@@ -1,0 +1,58 @@
+{
+  "expo": {
+    "name": "Casa Libre",
+    "slug": "casa-libre-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "casalibre",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": false,
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#f9f4ee"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "py.casalibre.mobile",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Casa Libre uses your location to show nearby properties on the map."
+      }
+    },
+    "android": {
+      "package": "py.casalibre.mobile",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#f9f4ee"
+      },
+      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#f9f4ee"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": false
+    },
+    "extra": {
+      "airobaseUrl": "https://d34d50f3d7174f8aadf0.db.airosofts.com",
+      "airobaseAnonKey": "sb_publishable_6EWIm0Y6tFSIk8atlHbl7QJhzI1ql11o",
+      "mediaBase": "https://casa-libre.com.py",
+      "apiBase": "https://casa-libre.com.py",
+      "pygPerUsd": 7300,
+      "googleClientId": "94575907403-h2eatm61rdk8j9vsd4dfv7ofhrjq91ks.apps.googleusercontent.com"
+    }
+  }
+}
