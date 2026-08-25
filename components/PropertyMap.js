@@ -3,16 +3,28 @@
 // it renders a simple notice instead.
 import { useEffect, useRef } from 'react';
 import { View, Text, Platform } from 'react-native';
+import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { colors, fonts, radii } from '../lib/theme';
 import { shortUsd } from '../lib/format';
 import { ASUNCION } from '../lib/config';
 
+// react-native-maps is a native module NOT bundled in Expo Go — only load it in a
+// dev/standalone build. In Expo Go (or web) we render a graceful fallback so the
+// rest of the app runs fine; the real map appears in an EAS/dev build.
+// (SDK 54: executionEnvironment==='storeClient' means Expo Go.)
+const IS_EXPO_GO = Constants.executionEnvironment === 'storeClient' || Constants.appOwnership === 'expo';
+const MAPS_UNAVAILABLE = Platform.OS === 'web' || IS_EXPO_GO;
+
 let MapView, Marker;
-if (Platform.OS !== 'web') {
-  const maps = require('react-native-maps');
-  MapView = maps.default;
-  Marker = maps.Marker;
+if (!MAPS_UNAVAILABLE) {
+  try {
+    const maps = require('react-native-maps');
+    MapView = maps.default;
+    Marker = maps.Marker;
+  } catch {
+    MapView = null;
+  }
 }
 
 export default function PropertyMap({ listings = [], style, single = null, onMarkerPress }) {
@@ -29,10 +41,12 @@ export default function PropertyMap({ listings = [], style, single = null, onMar
     return () => clearTimeout(id);
   }, [pts.length, single]);
 
-  if (Platform.OS === 'web') {
+  if (MAPS_UNAVAILABLE || !MapView) {
     return (
-      <View style={[{ backgroundColor: colors.hatch, alignItems: 'center', justifyContent: 'center' }, style]}>
-        <Text style={{ fontFamily: fonts.mono, color: colors.ink60 }}>Mapa disponible en la app móvil</Text>
+      <View style={[{ backgroundColor: colors.hatch, alignItems: 'center', justifyContent: 'center', padding: 20 }, style]}>
+        <Text style={{ fontFamily: fonts.mono, color: colors.ink60, fontSize: 12, textAlign: 'center' }}>
+          {pts.length} {pts.length === 1 ? 'ubicación' : 'ubicaciones'}{'\n'}Mapa disponible en la build completa
+        </Text>
       </View>
     );
   }
