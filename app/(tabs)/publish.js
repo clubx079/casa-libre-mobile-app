@@ -116,7 +116,7 @@ export default function Publish() {
   async function addPhotos() {
     try {
       const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsMultipleSelection: true,
         quality: 0.8,
         selectionLimit: 20,
