@@ -1,76 +1,83 @@
-// Map of listings with price-pill markers (react-native-maps). Default center
-// Asunción; fits to the result set. On web (where react-native-maps is unstable)
-// it renders a simple notice instead.
-import { useEffect, useRef } from 'react';
+// Map of listings using Leaflet + OpenStreetMap inside a WebView. This works in
+// Expo Go (react-native-webview is bundled) — unlike react-native-maps, which
+// needs a custom native build. Price-pill markers; tapping one opens the listing.
+import { useMemo } from 'react';
 import { View, Text, Platform } from 'react-native';
-import Constants from 'expo-constants';
+import { WebView } from 'react-native-webview';
 import { router } from 'expo-router';
-import { colors, fonts, radii } from '../lib/theme';
+import { colors, fonts } from '../lib/theme';
 import { shortUsd } from '../lib/format';
 import { ASUNCION } from '../lib/config';
 
-// react-native-maps is a native module NOT bundled in Expo Go — only load it in a
-// dev/standalone build. In Expo Go (or web) we render a graceful fallback so the
-// rest of the app runs fine; the real map appears in an EAS/dev build.
-// (SDK 54: executionEnvironment==='storeClient' means Expo Go.)
-const IS_EXPO_GO = Constants.executionEnvironment === 'storeClient' || Constants.appOwnership === 'expo';
-const MAPS_UNAVAILABLE = Platform.OS === 'web' || IS_EXPO_GO;
-
-let MapView, Marker;
-if (!MAPS_UNAVAILABLE) {
-  try {
-    const maps = require('react-native-maps');
-    MapView = maps.default;
-    Marker = maps.Marker;
-  } catch {
-    MapView = null;
-  }
+function buildHtml(points, center, zoom, single) {
+  const data = JSON.stringify(points);
+  const fit = single ? 'false' : 'true';
+  return `<!DOCTYPE html><html><head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+  html,body,#map{height:100%;margin:0;padding:0;background:#e9e6df;}
+  .pill{background:#111;color:#f9f4ee;font-family:'Courier New',monospace;font-size:12px;font-weight:600;
+        padding:4px 8px;border-radius:999px;border:1.5px solid #f9f4ee;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.4);}
+  .dot{width:16px;height:16px;background:#111;border:3px solid #f9f4ee;border-radius:999px;box-shadow:0 1px 4px rgba(0,0,0,.5);}
+  .leaflet-container{background:#e9e6df;}
+</style></head><body><div id="map"></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  var pts = ${data};
+  var map = L.map('map',{attributionControl:false,zoomControl:true}).setView([${center.lat},${center.lng}], ${zoom});
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
+  var coords=[];
+  pts.forEach(function(p){
+    var html = ${single ? "'<div class=\"dot\"></div>'" : "'<div class=\"pill\">'+p.label+'</div>'"};
+    var icon = L.divIcon({className:'',html:html,iconSize:null,iconAnchor:${single ? '[8,8]' : '[0,14]'}});
+    var m = L.marker([p.lat,p.lng],{icon:icon}).addTo(map);
+    m.on('click',function(){ if(window.ReactNativeWebView){ window.ReactNativeWebView.postMessage(p.id); } });
+    coords.push([p.lat,p.lng]);
+  });
+  if (${fit} && coords.length>1){ try{ map.fitBounds(coords,{padding:[40,40],maxZoom:15}); }catch(e){} }
+</script></body></html>`;
 }
 
 export default function PropertyMap({ listings = [], style, single = null, onMarkerPress }) {
-  const ref = useRef(null);
-  const pts = single ? [single] : listings.filter((l) => l.lat && l.lng);
+  const pts = single ? (single.lat && single.lng ? [single] : []) : listings.filter((l) => l.lat && l.lng);
 
-  useEffect(() => {
-    if (Platform.OS === 'web' || !ref.current || !pts.length) return;
-    const coords = pts.map((l) => ({ latitude: l.lat, longitude: l.lng }));
-    if (single) return; // single map uses initialRegion
-    const id = setTimeout(() => {
-      try { ref.current.fitToCoordinates(coords, { edgePadding: { top: 60, right: 60, bottom: 60, left: 60 }, animated: false }); } catch {}
-    }, 350);
-    return () => clearTimeout(id);
-  }, [pts.length, single]);
+  const html = useMemo(() => {
+    const points = pts.map((l) => ({ id: l.id, lat: l.lat, lng: l.lng, label: shortUsd(l.usd) }));
+    const center = single && single.lat ? { lat: single.lat, lng: single.lng } : ASUNCION.latitude
+      ? { lat: ASUNCION.latitude, lng: ASUNCION.longitude } : { lat: -25.293, lng: -57.6 };
+    const zoom = single ? 15 : 12;
+    return buildHtml(points, center, zoom, !!single);
+  }, [pts.length, single?.id]);
 
-  if (MAPS_UNAVAILABLE || !MapView) {
+  if (!pts.length) {
     return (
       <View style={[{ backgroundColor: colors.hatch, alignItems: 'center', justifyContent: 'center', padding: 20 }, style]}>
-        <Text style={{ fontFamily: fonts.mono, color: colors.ink60, fontSize: 12, textAlign: 'center' }}>
-          {pts.length} {pts.length === 1 ? 'ubicación' : 'ubicaciones'}{'\n'}Mapa disponible en la build completa
-        </Text>
+        <Text style={{ fontFamily: fonts.mono, color: colors.ink60, fontSize: 12 }}>Sin ubicación</Text>
       </View>
     );
   }
 
-  const region = single
-    ? { latitude: single.lat, longitude: single.lng, latitudeDelta: 0.01, longitudeDelta: 0.01 }
-    : { latitude: ASUNCION.latitude, longitude: ASUNCION.longitude, latitudeDelta: 0.14, longitudeDelta: 0.14 };
+  const onMessage = (e) => {
+    const id = e?.nativeEvent?.data;
+    if (!id) return;
+    if (onMarkerPress) onMarkerPress(id);
+    else router.push(`/property/${id}`);
+  };
 
   return (
     <View style={style}>
-      <MapView ref={ref} style={{ flex: 1 }} initialRegion={region} showsUserLocation showsMyLocationButton={false}>
-        {pts.map((l) => (
-          <Marker
-            key={l.id}
-            coordinate={{ latitude: l.lat, longitude: l.lng }}
-            onPress={() => (onMarkerPress ? onMarkerPress(l) : router.push(`/property/${l.id}`))}
-            tracksViewChanges={false}
-          >
-            <View style={{ backgroundColor: colors.ink, paddingHorizontal: 9, paddingVertical: 5, borderRadius: radii.pill, borderWidth: 1.5, borderColor: colors.paper }}>
-              <Text style={{ color: colors.paper, fontFamily: fonts.monoMed, fontSize: 11 }}>{shortUsd(l.usd)}</Text>
-            </View>
-          </Marker>
-        ))}
-      </MapView>
+      <WebView
+        originWhitelist={['*']}
+        source={{ html, baseUrl: 'https://casa-libre.com.py' }}
+        style={{ flex: 1, backgroundColor: colors.hatch }}
+        javaScriptEnabled
+        domStorageEnabled
+        onMessage={onMessage}
+        setSupportMultipleWindows={false}
+        androidLayerType="hardware"
+      />
     </View>
   );
 }
