@@ -167,7 +167,16 @@ export default function Marketplace() {
       {loading ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator color={colors.ink} /></View>
       ) : view === 'map' ? (
-        <PropertyMap listings={filtered} isFiltered={isFiltered} style={{ flex: 1 }} />
+        <View style={{ flex: 1 }}>
+          <PropertyMap listings={filtered} isFiltered={isFiltered} style={{ flex: 1 }} />
+          <Pressable
+            onPress={() => setView('list')}
+            style={{ position: 'absolute', bottom: 20, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.ink, borderRadius: radii.pill, paddingVertical: 12, paddingHorizontal: 22, ...hardShadow }}
+          >
+            <Ionicons name="list" size={18} color={colors.paper} />
+            <Text style={{ fontFamily: fonts.sansMed, fontSize: 15, color: colors.paper }}>{t('list')}</Text>
+          </Pressable>
+        </View>
       ) : (
         <FlatList
           data={visible}

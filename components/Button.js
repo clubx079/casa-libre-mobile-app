@@ -33,7 +33,7 @@ export default function Button({
       ) : (
         <>
           {icon}
-          <Text style={{ fontFamily: fonts.sansMed, fontSize: small ? 14 : 16, color: textColor }}>{label}</Text>
+          <Text numberOfLines={1} style={{ fontFamily: fonts.sansMed, fontSize: small ? 14 : 16, color: textColor }}>{label}</Text>
         </>
       )}
     </Pressable>

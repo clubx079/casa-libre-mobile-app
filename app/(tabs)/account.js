@@ -193,7 +193,7 @@ export default function Account() {
           <LinkRow
             icon="albums-outline"
             label={t('myListings')}
-            onPress={() => Alert.alert(t('comingSoon'))}
+            onPress={() => router.push('/my-listings')}
           />
           <LinkRow icon="business-outline" label={t('empresas')} onPress={() => router.push('/empresas')} />
           <LinkRow icon="chatbox-ellipses-outline" label={t('feedback')} onPress={() => router.push('/feedback')} />

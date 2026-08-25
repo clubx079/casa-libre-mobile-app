@@ -50,6 +50,7 @@ export default function RootLayout() {
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="property/[id]" options={{ animation: 'slide_from_bottom' }} />
             <Stack.Screen name="empresas" />
+            <Stack.Screen name="my-listings" />
             <Stack.Screen name="feedback" options={{ presentation: 'modal' }} />
             <Stack.Screen name="auth" options={{ presentation: 'modal' }} />
           </Stack>

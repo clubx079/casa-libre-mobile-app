@@ -22,7 +22,7 @@ export default function SaveButton({ id, variant = 'card', size = 20 }) {
         borderColor: colors.ink12,
       }}
     >
-      <Ionicons name={fav ? 'heart' : 'heart-outline'} size={size} color={fav ? colors.danger : colors.ink} />
+      <Ionicons name={fav ? 'heart' : 'heart-outline'} size={size} color={colors.ink} />
     </Pressable>
   );
 }
