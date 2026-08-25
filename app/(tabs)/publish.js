@@ -219,8 +219,8 @@ export default function Publish() {
           <Field>
             <Label>{t('addPhotos')}</Label>
             <Text style={{ fontFamily: fonts.sans, fontSize: 12, color: colors.ink45, marginBottom: 10 }}>{t('photosHint')}</Text>
-            <View style={{ marginBottom: 10, alignSelf: 'flex-start' }}>
-              <Button label={t('addPhotos')} variant="outline" small icon={<Ionicons name="images-outline" size={18} color={colors.ink} />} onPress={addPhotos} />
+            <View style={{ marginBottom: 10 }}>
+              <Button label={t('addPhotos')} variant="outline" icon={<Ionicons name="images-outline" size={18} color={colors.ink} />} onPress={addPhotos} style={{ alignSelf: 'stretch', backgroundColor: colors.card }} />
             </View>
             {photos.length > 0 ? (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">

@@ -2,12 +2,13 @@
 // lives in the sticky bottom bar (matches the website's mobile layout — no
 // duplicate WhatsApp button). Neutral seller role; anti-scam note; the
 // "not responding? report" link opens a bottom sheet.
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { View, Text, Pressable, TextInput, Linking, ToastAndroid, Platform, Alert, Modal, KeyboardAvoidingView } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, fonts, radii, hardShadow } from '../lib/theme';
 import { useI18n } from '../lib/i18n';
+import { useAuth } from '../lib/session';
 import { REF } from '../lib/format';
 import { telLink, genToken, trackContact, reportUnresponsive, normalizePy } from '../lib/contact';
 
@@ -18,19 +19,31 @@ function toast(msg) {
 
 export default function ContactCard({ listing: l }) {
   const { t } = useI18n();
+  const { user } = useAuth();
   const token = useMemo(() => genToken(), [l.id]);
   const [reportOpen, setReportOpen] = useState(false);
   const [reported, setReported] = useState(false);
   const [sending, setSending] = useState(false);
   const [reason, setReason] = useState('');
+  const [rName, setRName] = useState('');
+  const [rEmail, setREmail] = useState('');
   const phone = l.contact_phone;
+
+  // Prefill reporter name/email from the logged-in account (once available).
+  useEffect(() => {
+    if (user) { setRName((v) => v || user.full_name || ''); setREmail((v) => v || user.email || ''); }
+  }, [user]);
+
   if (!phone) return null;
 
   const call = () => { trackContact({ listingId: l.id, token, channel: 'call' }); Linking.openURL(telLink(phone)).catch(() => {}); };
   const copy = async () => { trackContact({ listingId: l.id, token, channel: 'copy' }); await Clipboard.setStringAsync(normalizePy(phone)); toast(t('copied')); };
   const submitReport = async () => {
     setSending(true);
-    await reportUnresponsive(l.id, { message: reason.trim(), listingRef: REF(l.id), sellerPhone: normalizePy(phone) });
+    await reportUnresponsive(l.id, {
+      message: reason.trim(), listingRef: REF(l.id), sellerPhone: normalizePy(phone),
+      reporterName: rName.trim(), reporterContact: rEmail.trim(),
+    });
     setSending(false); setReported(true);
     setTimeout(() => { setReportOpen(false); setReported(false); setReason(''); }, 1400);
   };
@@ -74,6 +87,25 @@ export default function ContactCard({ listing: l }) {
               <>
                 <Text style={{ fontFamily: fonts.sansBold, fontSize: 18, color: colors.ink, marginBottom: 8 }}>{t('reportTitle')}</Text>
                 <Text style={{ fontFamily: fonts.sans, fontSize: 14, color: colors.ink70, lineHeight: 20, marginBottom: 14 }}>{t('reportBody')}</Text>
+
+                <Text style={{ fontFamily: fonts.monoMed, fontSize: 12, color: colors.ink60, marginBottom: 6, textTransform: 'uppercase' }}>{t('fullName')}</Text>
+                <TextInput
+                  value={rName}
+                  onChangeText={setRName}
+                  placeholder={t('fullName')}
+                  placeholderTextColor={colors.ink45}
+                  style={{ borderWidth: 1.5, borderColor: colors.ink12, borderRadius: 14, padding: 12, fontFamily: fonts.sans, fontSize: 15, color: colors.ink, backgroundColor: colors.card, marginBottom: 12 }}
+                />
+                <Text style={{ fontFamily: fonts.monoMed, fontSize: 12, color: colors.ink60, marginBottom: 6, textTransform: 'uppercase' }}>{t('email')}</Text>
+                <TextInput
+                  value={rEmail}
+                  onChangeText={setREmail}
+                  placeholder={t('email')}
+                  placeholderTextColor={colors.ink45}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  style={{ borderWidth: 1.5, borderColor: colors.ink12, borderRadius: 14, padding: 12, fontFamily: fonts.sans, fontSize: 15, color: colors.ink, backgroundColor: colors.card, marginBottom: 12 }}
+                />
                 <Text style={{ fontFamily: fonts.monoMed, fontSize: 12, color: colors.ink60, marginBottom: 6, textTransform: 'uppercase' }}>{t('reportReason')}</Text>
                 <TextInput
                   value={reason}

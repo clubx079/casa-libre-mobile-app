@@ -204,7 +204,8 @@ export default function Account() {
           label={t('signOut')}
           variant="outline"
           onPress={signOut}
-          style={{ alignSelf: 'stretch', marginTop: 24 }}
+          icon={<Ionicons name="log-out-outline" size={18} color={colors.ink} />}
+          style={{ alignSelf: 'stretch', marginTop: 24, backgroundColor: colors.card }}
         />
       </ScrollView>
       </KeyboardAvoidingView>
