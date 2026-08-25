@@ -8,11 +8,6 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "icon": "./assets/icon.png",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#f9f4ee"
-    },
     "assetBundlePatterns": [
       "**/*"
     ],
@@ -44,6 +39,9 @@
       [
         "expo-splash-screen",
         {
+          "image": "./assets/splash.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
           "backgroundColor": "#f9f4ee"
         }
       ],
@@ -58,7 +56,12 @@
       "mediaBase": "https://casa-libre.com.py",
       "apiBase": "https://casa-libre.com.py",
       "pygPerUsd": 7300,
-      "googleClientId": "94575907403-h2eatm61rdk8j9vsd4dfv7ofhrjq91ks.apps.googleusercontent.com"
-    }
+      "googleClientId": "94575907403-h2eatm61rdk8j9vsd4dfv7ofhrjq91ks.apps.googleusercontent.com",
+      "router": {},
+      "eas": {
+        "projectId": "8e181c24-809f-4069-b315-352b3e4fefef"
+      }
+    },
+    "owner": "57110500"
   }
 }
