@@ -42,7 +42,10 @@ export default function PropertyDetail() {
   if (!l) return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.paper, alignItems: 'center', justifyContent: 'center', gap: 12 }}>
       <Text style={{ fontFamily: fonts.sans, color: colors.ink60 }}>{t('noResults')}</Text>
-      <Pressable onPress={() => router.back()}><Text style={{ fontFamily: fonts.mono, color: colors.ink }}>← {t('home')}</Text></Pressable>
+      <Pressable onPress={() => router.back()} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <Ionicons name="arrow-back" size={16} color={colors.ink} />
+        <Text style={{ fontFamily: fonts.mono, color: colors.ink }}>{t('backTo')}</Text>
+      </Pressable>
     </SafeAreaView>
   );
 
@@ -84,7 +87,7 @@ export default function PropertyDetail() {
           <Text style={{ fontFamily: fonts.sansBold, fontSize: 30, color: colors.ink }}>{l.usd ? fullUsd(l.usd) : '—'}</Text>
           {per ? <Text style={{ fontFamily: fonts.mono, fontSize: 14, color: colors.ink60 }}>{per}</Text> : null}
         </View>
-        {l.pyg ? <Text style={{ fontFamily: fonts.mono, fontSize: 13, color: colors.ink45, marginTop: 2 }}>≈ {pyg(l.usd)}</Text> : null}
+        {l.pyg ? <Text style={{ fontFamily: fonts.mono, fontSize: 13, color: colors.ink45, marginTop: 2 }}>{pyg(l.usd)}</Text> : null}
 
         {/* Specs rail */}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 18, marginTop: 20, paddingTop: 18, borderTopWidth: 1, borderTopColor: colors.ink08 }}>

@@ -25,7 +25,7 @@ const inputStyle = {
 };
 
 export default function Empresas() {
-  const { lang } = useI18n();
+  const { t, lang } = useI18n();
   const es = lang !== 'en';
 
   const [type, setType] = useState('inmobiliaria');
@@ -85,7 +85,7 @@ export default function Empresas() {
             {es ? '¡Gracias! Te contactaremos pronto.' : 'Thanks! We\'ll be in touch soon.'}
           </Text>
           <View style={{ alignSelf: 'stretch', marginTop: 8 }}>
-            <Button label={es ? 'Volver' : 'Back'} onPress={() => router.back()} />
+            <Button label={t('backTo')} onPress={() => router.back()} />
           </View>
         </View>
       </SafeAreaView>
@@ -101,12 +101,16 @@ export default function Empresas() {
           </Pressable>
         </View>
 
-        <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 8, gap: 22 }} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          contentContainerStyle={{ padding: 20, paddingTop: 8, gap: 22, paddingBottom: 60 }}
+          keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets
+        >
           {/* Hero */}
           <View style={{ gap: 14 }}>
             <Wordmark size={24} />
             <Text style={{ fontFamily: fonts.sansBold, fontSize: 30, color: colors.ink, lineHeight: 34 }}>
-              {es ? 'Para inmobiliarias y desarrolladoras' : 'For agencies & developers'}
+              {t('empresasTitle')}
             </Text>
             <Text style={{ fontFamily: fonts.sans, fontSize: 16, color: colors.ink70, lineHeight: 23 }}>
               {es

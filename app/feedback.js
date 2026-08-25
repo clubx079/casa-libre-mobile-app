@@ -21,7 +21,7 @@ const inputStyle = {
 };
 
 export default function Feedback() {
-  const { lang } = useI18n();
+  const { t, lang } = useI18n();
   const es = lang !== 'en';
 
   const [rating, setRating] = useState(0);
@@ -56,10 +56,10 @@ export default function Feedback() {
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 18 }}>
           <Ionicons name="checkmark-circle-outline" size={56} color={colors.success} />
           <Text style={{ fontFamily: fonts.sansBold, fontSize: 24, color: colors.ink, textAlign: 'center' }}>
-            {es ? '¡Gracias por tu comentario!' : 'Thanks for your feedback!'}
+            {t('thanks')}
           </Text>
           <View style={{ alignSelf: 'stretch', marginTop: 8 }}>
-            <Button label={es ? 'Volver' : 'Back'} onPress={() => router.back()} />
+            <Button label={t('backTo')} onPress={() => router.back()} />
           </View>
         </View>
       </SafeAreaView>
@@ -75,9 +75,13 @@ export default function Feedback() {
           </Pressable>
         </View>
 
-        <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 4, gap: 18 }} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          contentContainerStyle={{ padding: 20, paddingTop: 4, gap: 18, paddingBottom: 60 }}
+          keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets
+        >
           <Text style={{ fontFamily: fonts.sansBold, fontSize: 26, color: colors.ink }}>
-            {es ? '¿Cómo fue tu experiencia?' : 'How was your experience?'}
+            {t('feedbackTitle')}
           </Text>
 
           <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -126,7 +130,7 @@ export default function Feedback() {
           ) : null}
 
           <Button
-            label={es ? 'Enviar' : 'Send'}
+            label={t('feedbackSend')}
             onPress={submit}
             loading={loading}
             disabled={rating < 1}

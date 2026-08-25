@@ -1,6 +1,6 @@
 // Account tab — signed-out promo + quick links, or signed-in profile editor.
 import { useEffect, useState, useCallback } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, ActivityIndicator, ToastAndroid, Alert, Platform } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, ActivityIndicator, ToastAndroid, Alert, Platform, KeyboardAvoidingView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -60,6 +60,7 @@ const inputStyle = {
 
 export default function Account() {
   const { t, lang } = useI18n();
+  const es = lang !== 'en';
   const { user, loading, signOut } = useAuth();
 
   const [fullName, setFullName] = useState('');
@@ -112,22 +113,28 @@ export default function Account() {
   if (!user) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.paper }} edges={['top']}>
-        <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 32 }}>
-          <View style={{ alignItems: 'center', gap: 14, marginBottom: 28 }}>
-            <Wordmark size={30} />
-            <Text style={{ fontFamily: fonts.sans, fontSize: 15, color: colors.ink60, textAlign: 'center' }}>
-              {lang === 'en' ? 'Sign in to save and publish' : 'Iniciá sesión para guardar y publicar'}
-            </Text>
-            <Button label={t('signIn')} onPress={() => router.push('/auth')} style={{ alignSelf: 'stretch', marginTop: 4 }} />
-          </View>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <ScrollView
+            contentContainerStyle={{ padding: 20, paddingTop: 32, paddingBottom: 60 }}
+            keyboardShouldPersistTaps="handled"
+            automaticallyAdjustKeyboardInsets
+          >
+            <View style={{ alignItems: 'center', gap: 14, marginBottom: 28 }}>
+              <Wordmark size={30} />
+              <Text style={{ fontFamily: fonts.sans, fontSize: 15, color: colors.ink60, textAlign: 'center' }}>
+                {t('signInToSave')}
+              </Text>
+              <Button label={t('signIn')} onPress={() => router.push('/auth')} style={{ alignSelf: 'stretch', marginTop: 4 }} />
+            </View>
 
-          <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.ink45, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>
-            {lang === 'en' ? 'More' : 'Más'}
-          </Text>
-          <LinkRow icon="business-outline" label={t('empresas')} onPress={() => router.push('/empresas')} />
-          <LinkRow icon="chatbox-ellipses-outline" label={t('feedback')} onPress={() => router.push('/feedback')} />
-          <LangToggle />
-        </ScrollView>
+            <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.ink45, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>
+              {es ? 'Más' : 'More'}
+            </Text>
+            <LinkRow icon="business-outline" label={t('empresas')} onPress={() => router.push('/empresas')} />
+            <LinkRow icon="chatbox-ellipses-outline" label={t('feedback')} onPress={() => router.push('/feedback')} />
+            <LangToggle />
+          </ScrollView>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     );
   }
@@ -135,7 +142,12 @@ export default function Account() {
   // Signed in
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.paper }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 20 }}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView
+        contentContainerStyle={{ padding: 20, paddingBottom: 60 }}
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
+      >
         {/* Header */}
         <View style={{ marginBottom: 24 }}>
           <Text style={{ fontFamily: fonts.sansBold, fontSize: 26, color: colors.ink }}>
@@ -148,27 +160,27 @@ export default function Account() {
 
         {/* Profile editor */}
         <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.ink45, marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 }}>
-          {lang === 'en' ? 'Profile' : 'Perfil'}
+          {t('profile')}
         </Text>
 
         <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.ink60, marginBottom: 6 }}>
-          {lang === 'en' ? 'Name' : 'Nombre'}
+          {es ? 'Nombre' : 'Name'}
         </Text>
         <TextInput
           value={fullName}
           onChangeText={setFullName}
-          placeholder={lang === 'en' ? 'Your name' : 'Tu nombre'}
+          placeholder={es ? 'Tu nombre' : 'Your name'}
           placeholderTextColor={colors.ink45}
           style={[inputStyle, { marginBottom: 14 }]}
         />
 
         <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.ink60, marginBottom: 6 }}>
-          {lang === 'en' ? 'Phone' : 'Teléfono'}
+          {t('phone')}
         </Text>
         <TextInput
           value={phone}
           onChangeText={setPhone}
-          placeholder={lang === 'en' ? 'Your phone' : 'Tu teléfono'}
+          placeholder={es ? 'Tu teléfono' : 'Your phone'}
           placeholderTextColor={colors.ink45}
           keyboardType="phone-pad"
           style={[inputStyle, { marginBottom: 16 }]}
@@ -180,8 +192,8 @@ export default function Account() {
         <View style={{ marginTop: 32 }}>
           <LinkRow
             icon="albums-outline"
-            label={lang === 'en' ? 'My listings' : 'Mis publicaciones'}
-            onPress={() => Alert.alert(lang === 'en' ? 'Coming soon' : 'Próximamente')}
+            label={t('myListings')}
+            onPress={() => Alert.alert(t('comingSoon'))}
           />
           <LinkRow icon="business-outline" label={t('empresas')} onPress={() => router.push('/empresas')} />
           <LinkRow icon="chatbox-ellipses-outline" label={t('feedback')} onPress={() => router.push('/feedback')} />
@@ -195,6 +207,7 @@ export default function Account() {
           style={{ alignSelf: 'stretch', marginTop: 24 }}
         />
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

@@ -9,9 +9,9 @@ import { colors, fonts } from '../lib/theme';
 import { shortUsd } from '../lib/format';
 import { ASUNCION } from '../lib/config';
 
-function buildHtml(points, center, zoom, single) {
+function buildHtml(points, center, zoom, single, fitBounds) {
   const data = JSON.stringify(points);
-  const fit = single ? 'false' : 'true';
+  const fit = fitBounds ? 'true' : 'false';
   return `<!DOCTYPE html><html><head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
@@ -40,16 +40,18 @@ function buildHtml(points, center, zoom, single) {
 </script></body></html>`;
 }
 
-export default function PropertyMap({ listings = [], style, single = null, onMarkerPress }) {
+export default function PropertyMap({ listings = [], style, single = null, isFiltered = false, onMarkerPress }) {
   const pts = single ? (single.lat && single.lng ? [single] : []) : listings.filter((l) => l.lat && l.lng);
 
   const html = useMemo(() => {
     const points = pts.map((l) => ({ id: l.id, lat: l.lat, lng: l.lng, label: shortUsd(l.usd) }));
-    const center = single && single.lat ? { lat: single.lat, lng: single.lng } : ASUNCION.latitude
-      ? { lat: ASUNCION.latitude, lng: ASUNCION.longitude } : { lat: -25.293, lng: -57.6 };
+    // Default view is always Asunción; only fit-to-markers once a filter/search
+    // narrows the set (matches the website behavior).
+    const center = single && single.lat ? { lat: single.lat, lng: single.lng } : { lat: ASUNCION.latitude, lng: ASUNCION.longitude };
     const zoom = single ? 15 : 12;
-    return buildHtml(points, center, zoom, !!single);
-  }, [pts.length, single?.id]);
+    const fitBounds = !single && isFiltered;
+    return buildHtml(points, center, zoom, !!single, fitBounds);
+  }, [pts.length, single?.id, isFiltered]);
 
   if (!pts.length) {
     return (

@@ -1,6 +1,6 @@
 // Modal auth — email-first flow over the buyer portal's web API (see lib/session).
 import { useState } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,6 +16,23 @@ const inputStyle = {
   padding: 12, fontFamily: fonts.sans, fontSize: 16, color: colors.ink,
   backgroundColor: colors.card, alignSelf: 'stretch',
 };
+
+// Module-scope UI helpers — defining these inside the component would remount
+// every TextInput on each keystroke ("keyboard closes after one word" bug).
+function Heading({ children }) {
+  return (
+    <Text style={{ fontFamily: fonts.sansBold, fontSize: 22, color: colors.ink, marginTop: 20, marginBottom: 16, alignSelf: 'stretch' }}>
+      {children}
+    </Text>
+  );
+}
+
+function ErrorText({ error }) {
+  if (!error) return null;
+  return (
+    <Text style={{ fontFamily: fonts.sans, fontSize: 14, color: colors.danger, marginTop: 12, alignSelf: 'stretch' }}>{error}</Text>
+  );
+}
 
 export default function Auth() {
   const { t, lang } = useI18n();
@@ -83,26 +100,21 @@ export default function Auth() {
     setError('Código inválido');
   };
 
-  const Heading = ({ children }) => (
-    <Text style={{ fontFamily: fonts.sansBold, fontSize: 22, color: colors.ink, marginTop: 20, marginBottom: 16, alignSelf: 'stretch' }}>
-      {children}
-    </Text>
-  );
-
-  const ErrorText = () => error ? (
-    <Text style={{ fontFamily: fonts.sans, fontSize: 14, color: colors.danger, marginTop: 12, alignSelf: 'stretch' }}>{error}</Text>
-  ) : null;
-
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.paper }} edges={['top']}>
-      {/* Close */}
-      <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 16, paddingTop: 8 }}>
-        <Pressable onPress={close} hitSlop={12} style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}>
-          <Ionicons name="close" size={26} color={colors.ink} />
-        </Pressable>
-      </View>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        {/* Close */}
+        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 16, paddingTop: 8 }}>
+          <Pressable onPress={close} hitSlop={12} style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}>
+            <Ionicons name="close" size={26} color={colors.ink} />
+          </Pressable>
+        </View>
 
-      <ScrollView contentContainerStyle={{ flexGrow: 1, alignItems: 'center', paddingHorizontal: 20, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          contentContainerStyle={{ flexGrow: 1, alignItems: 'center', paddingHorizontal: 20, paddingBottom: 60 }}
+          keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets
+        >
         <View style={{ width: '100%', maxWidth: 420, alignItems: 'center' }}>
           <Wordmark size={30} />
 
@@ -119,9 +131,15 @@ export default function Auth() {
                 keyboardType="email-address"
                 style={inputStyle}
               />
-              <ErrorText />
-              <Button label={lang === 'en' ? 'Continue' : 'Continuar'} onPress={onContinue} loading={loading} style={{ alignSelf: 'stretch', marginTop: 16 }} />
-              <Button label="Google" variant="outline" onPress={onGoogle} icon={<Ionicons name="logo-google" size={18} color={colors.ink} />} style={{ alignSelf: 'stretch', marginTop: 12 }} />
+              <ErrorText error={error} />
+              <Button label={t('continue')} onPress={onContinue} loading={loading} style={{ alignSelf: 'stretch', marginTop: 16 }} />
+              <Button
+                label={t('signInGoogle')}
+                variant="outline"
+                onPress={onGoogle}
+                icon={<Ionicons name="logo-google" size={18} color={colors.ink} />}
+                style={{ alignSelf: 'stretch', marginTop: 12, backgroundColor: colors.card }}
+              />
             </>
           )}
 
@@ -138,17 +156,18 @@ export default function Auth() {
                 autoCapitalize="none"
                 style={inputStyle}
               />
-              <ErrorText />
+              <ErrorText error={error} />
               <Button label={t('signIn')} onPress={onLogin} loading={loading} style={{ alignSelf: 'stretch', marginTop: 16 }} />
-              <Pressable onPress={() => { setStep('email'); setError(''); setPassword(''); }} style={{ marginTop: 16 }}>
-                <Text style={{ fontFamily: fonts.sans, fontSize: 14, color: colors.ink60 }}>← usar otro correo</Text>
+              <Pressable onPress={() => { setStep('email'); setError(''); setPassword(''); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 16 }}>
+                <Ionicons name="arrow-back" size={16} color={colors.ink60} />
+                <Text style={{ fontFamily: fonts.sans, fontSize: 14, color: colors.ink60 }}>{t('useAnotherEmail')}</Text>
               </Pressable>
             </>
           )}
 
           {step === 'signup' && (
             <>
-              <Heading>{lang === 'en' ? 'Create account' : 'Crear cuenta'}</Heading>
+              <Heading>{t('createAccount')}</Heading>
               <Text style={{ fontFamily: fonts.mono, fontSize: 13, color: colors.ink60, alignSelf: 'stretch', marginBottom: 12 }}>{email}</Text>
               <TextInput
                 value={fullName}
@@ -174,10 +193,11 @@ export default function Auth() {
                 autoCapitalize="none"
                 style={inputStyle}
               />
-              <ErrorText />
-              <Button label={lang === 'en' ? 'Create account' : 'Crear cuenta'} onPress={onSignup} loading={loading} style={{ alignSelf: 'stretch', marginTop: 16 }} />
-              <Pressable onPress={() => { setStep('email'); setError(''); }} style={{ marginTop: 16 }}>
-                <Text style={{ fontFamily: fonts.sans, fontSize: 14, color: colors.ink60 }}>← usar otro correo</Text>
+              <ErrorText error={error} />
+              <Button label={t('createAccount')} onPress={onSignup} loading={loading} style={{ alignSelf: 'stretch', marginTop: 16 }} />
+              <Pressable onPress={() => { setStep('email'); setError(''); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 16 }}>
+                <Ionicons name="arrow-back" size={16} color={colors.ink60} />
+                <Text style={{ fontFamily: fonts.sans, fontSize: 14, color: colors.ink60 }}>{t('useAnotherEmail')}</Text>
               </Pressable>
             </>
           )}
@@ -197,15 +217,16 @@ export default function Auth() {
                 maxLength={6}
                 style={[inputStyle, { fontFamily: fonts.mono, fontSize: 22, letterSpacing: 8, textAlign: 'center' }]}
               />
-              <ErrorText />
-              <Button label={lang === 'en' ? 'Verify' : 'Verificar'} onPress={onVerify} loading={loading} style={{ alignSelf: 'stretch', marginTop: 16 }} />
+              <ErrorText error={error} />
+              <Button label={t('verify')} onPress={onVerify} loading={loading} style={{ alignSelf: 'stretch', marginTop: 16 }} />
               <Pressable onPress={onResend} style={{ marginTop: 16 }}>
-                <Text style={{ fontFamily: fonts.sans, fontSize: 14, color: colors.ink60 }}>Reenviar código</Text>
+                <Text style={{ fontFamily: fonts.sans, fontSize: 14, color: colors.ink60 }}>{t('resendCode')}</Text>
               </Pressable>
             </>
           )}
         </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

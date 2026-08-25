@@ -40,7 +40,7 @@ export default function PropertyCard({ listing: l, onPress }) {
             {per ? <Text style={{ fontFamily: fonts.mono, fontSize: 13, color: colors.ink60 }}>{per}</Text> : null}
           </View>
           {l.pyg ? (
-            <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.ink45, marginTop: 2 }}>≈ {pyg(l.usd)}</Text>
+            <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.ink45, marginTop: 2 }}>{pyg(l.usd)}</Text>
           ) : null}
           <Text style={{ fontFamily: fonts.sansMed, fontSize: 15, color: colors.ink, marginTop: 8 }} numberOfLines={1}>
             {title(l)}
