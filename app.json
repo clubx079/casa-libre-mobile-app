@@ -15,7 +15,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "py.casalibre.mobile",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Casa Libre uses your location to show nearby properties on the map."
+        "NSLocationWhenInUseUsageDescription": "Casa Libre uses your location to show nearby properties on the map.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {

@@ -28,3 +28,11 @@ npm-debug.*
 # Env
 .env
 .env.local
+AuthKey_*.p8
+ios-dist.p12
+ios-profile.mobileprovision
+credentials.json
+
+# scratch / local artifacts
+expo-qr.png
+scratch_expurl.txt
