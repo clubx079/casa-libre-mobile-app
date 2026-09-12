@@ -2,6 +2,7 @@
 // /api/account/listings; supports deleting one's own listing.
 import { useEffect, useState, useCallback } from 'react';
 import { View, Text, FlatList, ActivityIndicator, Pressable, Alert } from 'react-native';
+import MascotLoader from '../components/MascotLoader';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -65,7 +66,7 @@ export default function MyListings() {
       </View>
 
       {authLoading || loading ? (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator color={colors.ink} /></View>
+        <MascotLoader />
       ) : !user ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 16 }}>
           <Text style={{ fontFamily: fonts.sans, color: colors.ink60, textAlign: 'center' }}>{t('signInToPublish')}</Text>

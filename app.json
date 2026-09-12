@@ -6,7 +6,6 @@
     "orientation": "portrait",
     "scheme": "casalibre",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
     "icon": "./assets/icon.png",
     "assetBundlePatterns": [
       "**/*"
@@ -45,7 +44,9 @@
           "backgroundColor": "#f9f4ee"
         }
       ],
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-image",
+      "expo-status-bar"
     ],
     "experiments": {
       "typedRoutes": false

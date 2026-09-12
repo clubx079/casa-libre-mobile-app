@@ -9,14 +9,16 @@ import { title, metaLine, modeLabel } from '../lib/display';
 import { useI18n } from '../lib/i18n';
 import Hatch from './Hatch';
 import SaveButton from './SaveButton';
+import { MaterialIcons } from '@expo/vector-icons';
 
 export default function PropertyCard({ listing: l, onPress }) {
   const { lang, t } = useI18n();
   const per = l.mode === 'alquiler' ? (lang === 'en' ? '/mo' : '/mes') : '';
   const go = onPress || (() => router.push(`/property/${l.id}`));
+  const promoted = !!(l.verified || l.plan); // paid Verified / Landing listing
   return (
     <Pressable onPress={go} style={{ marginBottom: 16 }}>
-      <View style={{ backgroundColor: colors.card, borderRadius: radii.card, borderWidth: 1, borderColor: colors.ink08, overflow: 'hidden', ...softShadow }}>
+      <View style={{ backgroundColor: colors.card, borderRadius: radii.card, borderWidth: promoted ? 1.5 : 1, borderColor: promoted ? colors.ink : colors.ink08, overflow: 'hidden', ...softShadow }}>
         <View style={{ height: 200, backgroundColor: colors.hatch }}>
           {l.image ? (
             <Image source={{ uri: l.image }} style={{ width: '100%', height: '100%' }} contentFit="cover" transition={180} />
@@ -31,6 +33,12 @@ export default function PropertyCard({ listing: l, onPress }) {
           <View style={{ position: 'absolute', top: 8, right: 8 }}>
             <SaveButton id={l.id} variant="card" />
           </View>
+          {promoted && (
+            <View style={{ position: 'absolute', bottom: 12, left: 12, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.ink, paddingHorizontal: 9, paddingVertical: 5, borderRadius: radii.pill }}>
+              <MaterialIcons name="verified" size={13} color={colors.paper} />
+              <Text style={{ color: colors.paper, fontFamily: fonts.mono, fontSize: 10, letterSpacing: 0.5 }}>{(lang === 'en' ? 'Verified' : 'Verificada').toUpperCase()}</Text>
+            </View>
+          )}
         </View>
         <View style={{ padding: 14 }}>
           <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>

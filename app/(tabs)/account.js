@@ -1,6 +1,7 @@
 // Account tab — signed-out promo + quick links, or signed-in profile editor.
 import { useEffect, useState, useCallback } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, ActivityIndicator, ToastAndroid, Alert, Platform, KeyboardAvoidingView } from 'react-native';
+import MascotLoader from '../../components/MascotLoader';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -104,7 +105,7 @@ export default function Account() {
   if (loading) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.paper }} edges={['top']}>
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator color={colors.ink} /></View>
+        <MascotLoader />
       </SafeAreaView>
     );
   }

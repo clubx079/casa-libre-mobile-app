@@ -2,6 +2,7 @@
 // /publicar flow. Native only (multipart upload with the httpOnly cl_session cookie).
 import { useState } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator, Alert } from 'react-native';
+import MascotLoader from '../../components/MascotLoader';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -59,7 +60,7 @@ export default function Publish() {
   ];
 
   if (loading) {
-    return <SafeAreaView style={{ flex: 1, backgroundColor: colors.paper, alignItems: 'center', justifyContent: 'center' }} edges={['top']}><ActivityIndicator color={colors.ink} /></SafeAreaView>;
+    return <MascotLoader />;
   }
   if (!user) {
     return (

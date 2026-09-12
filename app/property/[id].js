@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { View, Text, ScrollView, ActivityIndicator, Pressable, Linking } from 'react-native';
+import MascotLoader from '../../components/MascotLoader';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -38,7 +39,7 @@ export default function PropertyDetail() {
     return () => { alive = false; };
   }, [id]);
 
-  if (loading) return <SafeAreaView style={{ flex: 1, backgroundColor: colors.paper, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator color={colors.ink} /></SafeAreaView>;
+  if (loading) return <MascotLoader />;
   if (!l) return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.paper, alignItems: 'center', justifyContent: 'center', gap: 12 }}>
       <Text style={{ fontFamily: fonts.sans, color: colors.ink60 }}>{t('noResults')}</Text>

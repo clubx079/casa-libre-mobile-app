@@ -9,6 +9,7 @@ import { title, typeLabel } from '../../lib/display';
 import PropertyCard from '../../components/PropertyCard';
 import PropertyMap from '../../components/PropertyMap';
 import Wordmark from '../../components/Wordmark';
+import MascotLoader from '../../components/MascotLoader';
 
 const norm = (s) => (s || '').toString().normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
@@ -165,7 +166,7 @@ export default function Marketplace() {
       </View>
 
       {loading ? (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator color={colors.ink} /></View>
+        <MascotLoader />
       ) : view === 'map' ? (
         <View style={{ flex: 1 }}>
           <PropertyMap listings={filtered} isFiltered={isFiltered} style={{ flex: 1 }} />

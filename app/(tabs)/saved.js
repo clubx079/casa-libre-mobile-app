@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { View, Text, FlatList, ActivityIndicator } from 'react-native';
+import MascotLoader from '../../components/MascotLoader';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -34,7 +35,7 @@ export default function Saved() {
         <Text style={{ fontFamily: fonts.sansBold, fontSize: 26, color: colors.ink }}>{t('saved')}</Text>
       </View>
       {loading ? (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator color={colors.ink} /></View>
+        <MascotLoader />
       ) : listings.length === 0 ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40, gap: 12 }}>
           <Ionicons name="heart-outline" size={44} color={colors.ink30} />
