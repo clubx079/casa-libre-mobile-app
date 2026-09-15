@@ -72,7 +72,7 @@ function buildHtml(points, center, zoom, single, fitBounds) {
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
 <style>
-  html,body,#map{height:100%;margin:0;padding:0;background:#E6DDCD;}
+  html,body,#map{height:100%;margin:0;padding:0;background:#E6DDCD;overflow:hidden;}
   /* Hide Google's on-map branding/attribution to match the website's clean look. */
   .gm-style-cc, .gmnoprint, .gm-bundled-control,
   a[href^="https://maps.google"], a[href^="http://maps.google"],
@@ -165,31 +165,62 @@ function buildHtml(points, center, zoom, single, fitBounds) {
     setupDblTapZoom(map);
   }
   // "Double-tap, hold, and drag to zoom" — the native Google Maps one-finger
-  // gesture. The Maps JS API does NOT ship this (only two-finger pinch + a
-  // discrete double-tap-to-zoom), so we implement it explicitly and ONLY act once
-  // a genuine double-tap-hold is detected. Every other touch (single-finger drag,
-  // two-finger pinch) is left untouched, so normal pan and pinch still work.
+  // gesture. The Maps JS API does NOT ship it (only two-finger pinch + a discrete
+  // double-tap-to-zoom), so we implement it explicitly and ONLY act once a genuine
+  // double-tap-hold is detected. Single-finger pan and two-finger pinch are left
+  // untouched (we bail whenever touches.length !== 1).
+  //
+  // SMOOTHNESS: during the drag we DON'T call map.setZoom every frame — each
+  // setZoom reloads map tiles, which lags behind the finger. Instead we apply a
+  // GPU-accelerated CSS transform:scale() to the map div, anchored at the
+  // double-tap point (transform-origin) — this tracks the finger instantly with
+  // zero tile work (same trick Google Maps uses: scaled/blurry tiles while
+  // gesturing, sharp on release). We commit the real zoom exactly ONCE on
+  // touchend (Δzoom = log2(scaleFactor)) and recenter so the anchor point stays
+  // put, then drop the transform so tiles reload a single time at the final zoom.
   function setupDblTapZoom(map){
     var el = document.getElementById('map');
     if (!el) return;
-    var TAP_GAP = 300, TAP_DIST = 40, SENS = 1/70; // zoom levels per px of drag
+    // ~175px of drag == one zoom level (a comfortable ~150-200px = 1x).
+    var TAP_GAP = 300, TAP_DIST = 40, PX_PER_ZOOM = 175, MINZ = 3, MAXZ = 20;
     var lastTapTime = 0, lastTapX = 0, lastTapY = 0;
-    var active = false, startY = 0, startZoom = 0, pending = null, raf = null;
-    function apply(){
-      raf = null;
-      if (!active || pending == null) return;
-      var z = Math.max(2, Math.min(21, pending));
-      try { map.setZoom(z); } catch(e){}
+    var active = false, originX = 0, originY = 0, startZoom = 0, targetScale = 1, raf = null;
+    function paint(){ raf = null; if (active) el.style.transform = 'scale(' + targetScale + ')'; }
+    function clearTransform(){ el.style.transform = ''; el.style.transformOrigin = ''; el.style.willChange = 'auto'; }
+    function commit(){
+      var dz = Math.log(targetScale) / Math.LN2;                 // log2(scaleFactor)
+      var newZoom = Math.max(MINZ, Math.min(MAXZ, startZoom + dz));
+      try {
+        var proj = map.getProjection();
+        if (proj) {
+          // Anchor the double-tap point: convert it to a world coord at the old
+          // zoom, then pick the new center that keeps it under the same pixel.
+          var rect = el.getBoundingClientRect();
+          var px = originX - rect.left, py = originY - rect.top;
+          var cx = rect.width / 2, cy = rect.height / 2;
+          var s0 = 256 * Math.pow(2, startZoom), s1 = 256 * Math.pow(2, newZoom);
+          var wc = proj.fromLatLngToPoint(map.getCenter());
+          var ax = wc.x + (px - cx) / s0, ay = wc.y + (py - cy) / s0;
+          var nc = new google.maps.Point(ax - (px - cx) / s1, ay - (py - cy) / s1);
+          map.setZoom(newZoom);
+          map.setCenter(proj.fromPointToLatLng(nc));
+        } else {
+          map.setZoom(newZoom);                                  // fallback: zoom about center
+        }
+      } catch(err) { try { map.setZoom(newZoom); } catch(e2){} }
+      clearTransform();                                          // tiles reload ONCE, at final zoom
     }
     el.addEventListener('touchstart', function(e){
-      if (e.touches.length !== 1) { active = false; return; } // 2 fingers => pinch
+      if (e.touches.length !== 1) { if (active) { active = false; clearTransform(); } return; } // 2 fingers => pinch
       var t = e.touches[0], now = Date.now();
       var dx = t.clientX - lastTapX, dy = t.clientY - lastTapY;
       var near = (dx*dx + dy*dy) < TAP_DIST*TAP_DIST;
       if (now - lastTapTime < TAP_GAP && near) {
-        // Second tap of a double-tap and the finger is still down: start zooming.
-        active = true; startY = t.clientY;
+        // Second tap of a double-tap and the finger is still down: begin zoom.
+        active = true; originX = t.clientX; originY = t.clientY; targetScale = 1;
         startZoom = (typeof map.getZoom() === 'number') ? map.getZoom() : ${zoom};
+        el.style.transformOrigin = originX + 'px ' + originY + 'px';
+        el.style.willChange = 'transform';
         e.preventDefault(); e.stopPropagation();      // suppress Google's own dbl-tap zoom
       } else {
         active = false;
@@ -199,13 +230,14 @@ function buildHtml(points, center, zoom, single, fitBounds) {
     el.addEventListener('touchmove', function(e){
       if (!active || e.touches.length !== 1) return;
       e.preventDefault(); e.stopPropagation();          // don't let the map pan
-      var t = e.touches[0];
-      pending = startZoom + (startY - t.clientY) * SENS; // drag UP = zoom in
-      if (raf == null) raf = requestAnimationFrame(apply); // throttle to frames
+      var f = Math.pow(2, (originY - e.touches[0].clientY) / PX_PER_ZOOM); // drag UP = zoom in
+      // Clamp the visual scale so the committed zoom can't exceed the map limits.
+      var fMin = Math.pow(2, MINZ - startZoom), fMax = Math.pow(2, MAXZ - startZoom);
+      targetScale = f < fMin ? fMin : (f > fMax ? fMax : f);
+      if (raf == null) raf = requestAnimationFrame(paint); // one style write per frame
     }, { passive: false, capture: true });
-    function end(){ active = false; pending = null; }
-    el.addEventListener('touchend', end, { capture: true });
-    el.addEventListener('touchcancel', end, { capture: true });
+    el.addEventListener('touchend', function(){ if (active) { active = false; commit(); } }, { capture: true });
+    el.addEventListener('touchcancel', function(){ if (active) { active = false; clearTransform(); } }, { capture: true });
   }
   // Recenter on the user's location and drop/update a "you are here" marker.
   // Called from React Native via WebView.injectJavaScript().
