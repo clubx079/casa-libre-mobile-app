@@ -50,7 +50,15 @@ export default function RootLayout() {
             }}
           >
             <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="property/[id]" options={{ animation: 'slide_from_bottom' }} />
+            {/* Transparent modal so the screen BELOW (the marketplace) stays
+                mounted and visible behind the page during the pull-down dismiss —
+                a plain card/slide_from_bottom route detaches it, leaving a blank
+                paper screen + a multi-second remount. The page paints its own
+                opaque paper card (see app/property/[id].js). */}
+            <Stack.Screen
+              name="property/[id]"
+              options={{ presentation: 'transparentModal', animation: 'slide_from_bottom', contentStyle: { backgroundColor: 'transparent' } }}
+            />
             <Stack.Screen name="empresas" />
             <Stack.Screen name="my-listings" />
             <Stack.Screen name="feedback" options={{ presentation: 'modal' }} />

@@ -93,9 +93,13 @@ export default function PropertyDetail() {
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.paper }} edges={['top']}>
      <GestureDetector gesture={dismissPan}>
-      <Animated.View style={[{ flex: 1 }, dismissStyle]}>
+      {/* The moving CARD carries the opaque paper background and fills the whole
+          screen at rest; the route's container is transparent (transparentModal)
+          so translating this card down reveals the mounted marketplace behind it,
+          exactly like the image viewer reveals the page behind. */}
+      <Animated.View style={[{ flex: 1, backgroundColor: colors.paper }, dismissStyle]}>
+       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
       {/* Top bar */}
       <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6 }}>
         <Pressable onPress={() => router.back()} hitSlop={12} style={{ padding: 6 }}>
@@ -183,8 +187,8 @@ export default function PropertyDetail() {
           </Pressable>
         </View>
       ) : null}
+       </SafeAreaView>
       </Animated.View>
      </GestureDetector>
-    </SafeAreaView>
   );
 }
