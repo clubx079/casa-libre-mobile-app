@@ -10,20 +10,34 @@ import { View, Text, Pressable, ActivityIndicator } from 'react-native';
 import { WebView } from 'react-native-webview';
 import Svg, { Path } from 'react-native-svg';
 import { router } from 'expo-router';
-import { colors, fonts, hardShadow } from '../lib/theme';
+import { colors, fonts } from '../lib/theme';
 import { shortUsd } from '../lib/format';
 import { getMapCenter } from '../lib/config';
 import { getCountry } from '../lib/country';
 
-// Google-Maps-style navigation triangle, tilted 45° — same glyph/path the website
-// uses for its "my location" control (components/MarketplaceClient.js).
-function NavTriangle({ size = 18, color = colors.ink }) {
+// Google-Maps-style navigation triangle, tilted 45° — pixel-faithful to the
+// website's CURRENT "my location" control (components/MobileMarketplace.js):
+// 19px glyph, path M12 2 4.5 20.3…, rotate(45deg), Google-gray #3c4043 fill on a
+// white circle with a soft 0 1px 4px rgba(0,0,0,.3) shadow.
+const LOCATE_INK = '#3c4043';
+function NavTriangle({ size = 19, color = LOCATE_INK }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={{ transform: [{ rotate: '45deg' }] }}>
       <Path d="M12 2 4.5 20.3l.7.7L12 18l6.8 3 .7-.7z" />
     </Svg>
   );
 }
+
+// Soft drop shadow matching the website's shadow-[0_1px_4px_rgba(0,0,0,0.3)] —
+// deliberately NOT the brand hard-offset shadow; the site's locate control is a
+// standard Google-style floating button.
+const locateShadow = {
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 1 },
+  shadowOpacity: 0.3,
+  shadowRadius: 4,
+  elevation: 3,
+};
 
 // Public (client) Maps JS key — same one the website uses; referrer-restricted to
 // casa-libre.com.py, which the WebView baseUrl below satisfies.
@@ -118,6 +132,9 @@ function buildHtml(points, center, zoom, single, fitBounds) {
     var map = new google.maps.Map(document.getElementById('map'), {
       center: { lat: ${center.lat}, lng: ${center.lng} }, zoom: ${zoom},
       styles: CL_STYLE, disableDefaultUI: true, clickableIcons: false, keyboardShortcuts: false, gestureHandling: 'greedy',
+      // Fractional zoom keeps the double-tap-drag gesture (below) buttery instead
+      // of snapping between integer levels (raster maps default this to false).
+      isFractionalZoomEnabled: true,
     });
     var bounds = new google.maps.LatLngBounds();
     var clusterMarkers = [];
@@ -145,6 +162,50 @@ function buildHtml(points, center, zoom, single, fitBounds) {
     }
     if (${fit} && pts.length > 1) { try { map.fitBounds(bounds, 40); } catch(e){} }
     window.__clMap = map;
+    setupDblTapZoom(map);
+  }
+  // "Double-tap, hold, and drag to zoom" — the native Google Maps one-finger
+  // gesture. The Maps JS API does NOT ship this (only two-finger pinch + a
+  // discrete double-tap-to-zoom), so we implement it explicitly and ONLY act once
+  // a genuine double-tap-hold is detected. Every other touch (single-finger drag,
+  // two-finger pinch) is left untouched, so normal pan and pinch still work.
+  function setupDblTapZoom(map){
+    var el = document.getElementById('map');
+    if (!el) return;
+    var TAP_GAP = 300, TAP_DIST = 40, SENS = 1/70; // zoom levels per px of drag
+    var lastTapTime = 0, lastTapX = 0, lastTapY = 0;
+    var active = false, startY = 0, startZoom = 0, pending = null, raf = null;
+    function apply(){
+      raf = null;
+      if (!active || pending == null) return;
+      var z = Math.max(2, Math.min(21, pending));
+      try { map.setZoom(z); } catch(e){}
+    }
+    el.addEventListener('touchstart', function(e){
+      if (e.touches.length !== 1) { active = false; return; } // 2 fingers => pinch
+      var t = e.touches[0], now = Date.now();
+      var dx = t.clientX - lastTapX, dy = t.clientY - lastTapY;
+      var near = (dx*dx + dy*dy) < TAP_DIST*TAP_DIST;
+      if (now - lastTapTime < TAP_GAP && near) {
+        // Second tap of a double-tap and the finger is still down: start zooming.
+        active = true; startY = t.clientY;
+        startZoom = (typeof map.getZoom() === 'number') ? map.getZoom() : ${zoom};
+        e.preventDefault(); e.stopPropagation();      // suppress Google's own dbl-tap zoom
+      } else {
+        active = false;
+      }
+      lastTapTime = now; lastTapX = t.clientX; lastTapY = t.clientY;
+    }, { passive: false, capture: true });
+    el.addEventListener('touchmove', function(e){
+      if (!active || e.touches.length !== 1) return;
+      e.preventDefault(); e.stopPropagation();          // don't let the map pan
+      var t = e.touches[0];
+      pending = startZoom + (startY - t.clientY) * SENS; // drag UP = zoom in
+      if (raf == null) raf = requestAnimationFrame(apply); // throttle to frames
+    }, { passive: false, capture: true });
+    function end(){ active = false; pending = null; }
+    el.addEventListener('touchend', end, { capture: true });
+    el.addEventListener('touchcancel', end, { capture: true });
   }
   // Recenter on the user's location and drop/update a "you are here" marker.
   // Called from React Native via WebView.injectJavaScript().
@@ -232,11 +293,11 @@ export default function PropertyMap({ listings = [], style, single = null, isFil
           style={({ pressed }) => [{
             position: 'absolute', right: 16, bottom: 92,
             width: 44, height: 44, borderRadius: 22,
-            backgroundColor: colors.card, alignItems: 'center', justifyContent: 'center',
-            ...hardShadow,
-          }, pressed && { transform: [{ translateX: 1 }, { translateY: 1 }] }]}
+            backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center',
+            ...locateShadow,
+          }, pressed && { transform: [{ translateY: 1 }] }]}
         >
-          {locating ? <ActivityIndicator size="small" color={colors.ink} /> : <NavTriangle size={18} color={colors.ink} />}
+          {locating ? <ActivityIndicator size="small" color={LOCATE_INK} /> : <NavTriangle size={19} color={LOCATE_INK} />}
         </Pressable>
       ) : null}
     </View>

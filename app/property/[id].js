@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { View, Text, ScrollView, ActivityIndicator, Pressable, Linking, Dimensions } from 'react-native';
+import { View, Text, ScrollView, ActivityIndicator, Pressable, Linking } from 'react-native';
 import MascotLoader from '../../components/MascotLoader';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { useSharedValue, useAnimatedStyle, useAnimatedScrollHandler, useAnimatedRef, withSpring, withTiming, runOnJS } from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, useAnimatedScrollHandler, useAnimatedRef, withSpring, runOnJS } from 'react-native-reanimated';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, fonts, radii, hardShadow } from '../../lib/theme';
@@ -29,8 +29,6 @@ function Spec({ label, value }) {
   );
 }
 
-const { height: SCREEN_H } = Dimensions.get('window');
-
 export default function PropertyDetail() {
   const { id } = useLocalSearchParams();
   const { t, lang } = useI18n();
@@ -55,7 +53,14 @@ export default function PropertyDetail() {
     })
     .onEnd((e) => {
       if (translateY.value > 130 || (e.velocityY > 900 && translateY.value > 40)) {
-        translateY.value = withTiming(SCREEN_H, { duration: 200 }, () => runOnJS(goBack)());
+        // Hand off to the navigator's own slide_from_bottom pop (app/_layout.js):
+        // it slides the screen the rest of the way down in ONE continuous motion,
+        // starting from where the finger released. We used to ALSO animate our own
+        // translateY to SCREEN_H here first, so the page slid off AND THEN the
+        // native pop slid the now-empty screen again — the "double dismiss".
+        // Leaving translateY at the release position lets the single native slide
+        // carry it off smoothly.
+        runOnJS(goBack)();
       } else {
         translateY.value = withSpring(0, { damping: 20, stiffness: 220 });
       }
