@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
-import { View, Text, ScrollView, ActivityIndicator, Pressable, Linking } from 'react-native';
+import { View, Text, ScrollView, ActivityIndicator, Pressable, Linking, Dimensions } from 'react-native';
 import MascotLoader from '../../components/MascotLoader';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, { useSharedValue, useAnimatedStyle, useAnimatedScrollHandler, useAnimatedRef, withSpring, withTiming, runOnJS } from 'react-native-reanimated';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, fonts, radii, hardShadow } from '../../lib/theme';
@@ -27,11 +29,38 @@ function Spec({ label, value }) {
   );
 }
 
+const { height: SCREEN_H } = Dimensions.get('window');
+
 export default function PropertyDetail() {
   const { id } = useLocalSearchParams();
   const { t, lang } = useI18n();
   const [l, setL] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // Pull-down-to-dismiss: swiping DOWN from the top of the page navigates back,
+  // the standard "dismiss a pushed screen" behavior. It only engages while the
+  // ScrollView is at the top (scrollY <= 0), so it never fights normal scrolling.
+  const scrollRef = useAnimatedRef();
+  const scrollY = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const onScroll = useAnimatedScrollHandler((e) => { scrollY.value = e.contentOffset.y; });
+  const goBack = () => router.back();
+  const dismissPan = Gesture.Pan()
+    .activeOffsetY(14)
+    .failOffsetX([-24, 24])
+    .simultaneousWithExternalGesture(scrollRef)
+    .onUpdate((e) => {
+      // Only drag the page down when at the top and pulling downward.
+      if (scrollY.value <= 0 && e.translationY > 0) translateY.value = e.translationY;
+    })
+    .onEnd((e) => {
+      if (translateY.value > 130 || (e.velocityY > 900 && translateY.value > 40)) {
+        translateY.value = withTiming(SCREEN_H, { duration: 200 }, () => runOnJS(goBack)());
+      } else {
+        translateY.value = withSpring(0, { damping: 20, stiffness: 220 });
+      }
+    });
+  const dismissStyle = useAnimatedStyle(() => ({ transform: [{ translateY: translateY.value }] }));
 
   useEffect(() => {
     let alive = true;
@@ -60,6 +89,8 @@ export default function PropertyDetail() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.paper }} edges={['top']}>
+     <GestureDetector gesture={dismissPan}>
+      <Animated.View style={[{ flex: 1 }, dismissStyle]}>
       {/* Top bar */}
       <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6 }}>
         <Pressable onPress={() => router.back()} hitSlop={12} style={{ padding: 6 }}>
@@ -70,7 +101,7 @@ export default function PropertyDetail() {
         </Text>
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
+      <Animated.ScrollView ref={scrollRef} onScroll={onScroll} scrollEventThrottle={16} contentContainerStyle={{ padding: 16, paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
         <ImageGallery
           images={l.images}
           badge={modeLabel(l, lang).toUpperCase()}
@@ -133,7 +164,7 @@ export default function PropertyDetail() {
             <PropertyMap single={l} style={{ height: 220, borderRadius: radii.card, overflow: 'hidden', borderWidth: 1, borderColor: colors.ink12 }} />
           </View>
         ) : null}
-      </ScrollView>
+      </Animated.ScrollView>
 
       {/* Sticky WhatsApp bar */}
       {l.contact_phone ? (
@@ -147,6 +178,8 @@ export default function PropertyDetail() {
           </Pressable>
         </View>
       ) : null}
+      </Animated.View>
+     </GestureDetector>
     </SafeAreaView>
   );
 }

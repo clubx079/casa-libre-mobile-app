@@ -8,7 +8,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, fonts, radii } from '../../lib/theme';
 import { useI18n } from '../../lib/i18n';
 import { useAuth } from '../../lib/session';
-import { API_BASE } from '../../lib/config';
+import { useCountry, SUPPORTED, PROFILES } from '../../lib/country';
+import { getApiBase } from '../../lib/config';
 import Button from '../../components/Button';
 import Wordmark from '../../components/Wordmark';
 
@@ -53,6 +54,32 @@ function LangToggle() {
   );
 }
 
+// Country switcher — mirrors the web's per-country model. Persists the choice
+// (AsyncStorage, via CountryProvider) and re-renders the app against that country.
+function CountrySelector() {
+  const { code, setCountry } = useCountry();
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, paddingHorizontal: 4 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <Ionicons name="globe-outline" size={20} color={colors.ink} />
+        <Text style={{ fontFamily: fonts.sans, fontSize: 16, color: colors.ink }}>País / Country</Text>
+      </View>
+      <View style={{ flexDirection: 'row', borderWidth: 1.5, borderColor: colors.ink, borderRadius: radii.pill, overflow: 'hidden' }}>
+        {SUPPORTED.map((c) => {
+          const on = c === code;
+          return (
+            <Pressable key={c} onPress={() => setCountry(c)} style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: on ? colors.ink : 'transparent' }}>
+              <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: on ? colors.paper : colors.ink, letterSpacing: 0.5 }}>
+                {PROFILES[c].flag} {c.toUpperCase()}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 const inputStyle = {
   borderWidth: 1.5, borderColor: colors.ink12, borderRadius: 14,
   padding: 12, fontFamily: fonts.sans, fontSize: 16, color: colors.ink,
@@ -71,7 +98,7 @@ export default function Account() {
   const loadProfile = useCallback(async () => {
     if (!user) return;
     try {
-      const res = await fetch(`${API_BASE}/api/account/profile`, { credentials: 'include' });
+      const res = await fetch(`${getApiBase()}/api/account/profile`, { credentials: 'include' });
       const data = await res.json().catch(() => ({}));
       const p = data.profile || data || {};
       setFullName(p.full_name || user.full_name || '');
@@ -88,7 +115,7 @@ export default function Account() {
   const save = async () => {
     setSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/api/account/profile`, {
+      const res = await fetch(`${getApiBase()}/api/account/profile`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -133,6 +160,7 @@ export default function Account() {
             </Text>
             <LinkRow icon="business-outline" label={t('empresas')} onPress={() => router.push('/empresas')} />
             <LinkRow icon="chatbox-ellipses-outline" label={t('feedback')} onPress={() => router.push('/feedback')} />
+            <CountrySelector />
             <LangToggle />
           </ScrollView>
         </KeyboardAvoidingView>
@@ -198,6 +226,7 @@ export default function Account() {
           />
           <LinkRow icon="business-outline" label={t('empresas')} onPress={() => router.push('/empresas')} />
           <LinkRow icon="chatbox-ellipses-outline" label={t('feedback')} onPress={() => router.push('/feedback')} />
+          <CountrySelector />
           <LangToggle />
         </View>
 

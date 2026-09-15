@@ -7,11 +7,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import * as WebBrowser from 'expo-web-browser';
+import { Linking } from 'react-native';
 import { Image } from 'expo-image';
 import { colors, fonts, radii } from '../../lib/theme';
 import { useI18n } from '../../lib/i18n';
 import { useAuth } from '../../lib/session';
-import { API_BASE } from '../../lib/config';
+import { getApiBase } from '../../lib/config';
 import Button from '../../components/Button';
 
 // ── Module-scope UI helpers (defining these inside the component would remount
@@ -33,6 +35,17 @@ function Chip({ active, label, onPress }) {
     </Pressable>
   );
 }
+// Square checkbox row (no prices shown — paid options only steer the publish route).
+function CheckRow({ checked, label, onToggle }) {
+  return (
+    <Pressable onPress={onToggle} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10 }}>
+      <View style={{ width: 24, height: 24, borderRadius: 7, borderWidth: 1.5, borderColor: colors.ink, backgroundColor: checked ? colors.ink : colors.card, alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+        {checked ? <Ionicons name="checkmark" size={16} color={colors.paper} /> : null}
+      </View>
+      <Text style={{ flex: 1, fontFamily: fonts.sansMed, fontSize: 15, color: colors.ink }}>{label}</Text>
+    </Pressable>
+  );
+}
 
 export default function Publish() {
   const { t } = useI18n();
@@ -49,6 +62,8 @@ export default function Publish() {
   const [contactPhone, setContactPhone] = useState('');
   const [description, setDescription] = useState('');
   const [photos, setPhotos] = useState([]);
+  const [wantVerified, setWantVerified] = useState(false); // paid: Verified on marketplace
+  const [wantHome, setWantHome] = useState(false);         // paid: Display on home page
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(null);
@@ -93,7 +108,7 @@ export default function Publish() {
   function resetForm() {
     setMode('venta'); setPtype('casa'); setNeighborhood(''); setCity('Asunción'); setPrice('');
     setCurrency('US$'); setArea(''); setContactName(user?.full_name || ''); setContactPhone('');
-    setDescription(''); setPhotos([]); setError(''); setDone(null);
+    setDescription(''); setPhotos([]); setWantVerified(false); setWantHome(false); setError(''); setDone(null);
   }
   async function addPhotos() {
     try {
@@ -119,6 +134,15 @@ export default function Publish() {
     return '';
   }
   async function submit() {
+    // Paid visibility (Verified / Home page) is sold + charged on the website only.
+    // If either box is checked, don't publish from the app — send the user to the
+    // web publish page to complete payment there. No payment logic lives in the app.
+    if (wantVerified || wantHome) {
+      const url = `${getApiBase()}/publicar`;
+      try { await WebBrowser.openBrowserAsync(url); }
+      catch { Linking.openURL(url).catch(() => {}); }
+      return;
+    }
     const msg = validate();
     if (msg) { setError(msg); return; }
     setError(''); setSubmitting(true);
@@ -135,7 +159,7 @@ export default function Publish() {
       fd.append('contact_name', contactName.trim());
       fd.append('contact_phone', (contactPhone || '').replace(/\D/g, ''));
       photos.forEach((a, i) => fd.append('photos', { uri: a.uri, name: `photo${i}.jpg`, type: 'image/jpeg' }));
-      const res = await fetch(`${API_BASE}/api/publish`, { method: 'POST', credentials: 'include', body: fd });
+      const res = await fetch(`${getApiBase()}/api/publish`, { method: 'POST', credentials: 'include', body: fd });
       const data = await res.json().catch(() => ({}));
       if (res.ok && (data.ref || data.ok)) setDone({ ref: data.ref || 'CL-…' });
       else setError((data && data.error) || 'No se pudo publicar. Intentá de nuevo.');
@@ -154,7 +178,7 @@ export default function Publish() {
           automaticallyAdjustKeyboardInsets
           showsVerticalScrollIndicator={false}
         >
-          <Text style={{ fontFamily: fonts.sansBold, fontSize: 26, color: colors.ink, marginBottom: 20 }}>{t('listForFree')}</Text>
+          <Text style={{ fontFamily: fonts.sansBold, fontSize: 26, color: colors.ink, marginBottom: 20 }}>{t('publishTitle')}</Text>
 
           <Field>
             <Label>{t('mode')}</Label>
@@ -239,6 +263,18 @@ export default function Publish() {
                   </View>
                 ))}
               </ScrollView>
+            ) : null}
+          </Field>
+
+          <Field>
+            <Label>{t('addVisibility')}</Label>
+            <View style={{ borderWidth: 1.5, borderColor: colors.ink12, borderRadius: 14, backgroundColor: colors.card, paddingHorizontal: 14, paddingVertical: 4 }}>
+              <CheckRow checked={wantVerified} label={t('optVerified')} onToggle={() => setWantVerified((v) => !v)} />
+              <View style={{ height: 1, backgroundColor: colors.ink12 }} />
+              <CheckRow checked={wantHome} label={t('optHome')} onToggle={() => setWantHome((v) => !v)} />
+            </View>
+            {(wantVerified || wantHome) ? (
+              <Text style={{ fontFamily: fonts.sans, fontSize: 12, color: colors.ink45, marginTop: 8 }}>{t('paidHint')}</Text>
             ) : null}
           </Field>
 

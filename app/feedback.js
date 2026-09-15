@@ -6,7 +6,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, fonts, radii } from '../lib/theme';
 import { useI18n } from '../lib/i18n';
-import { API_BASE } from '../lib/config';
+import { getApiBase } from '../lib/config';
 import Button from '../components/Button';
 
 const inputStyle = {
@@ -37,7 +37,7 @@ export default function Feedback() {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`${API_BASE}/api/feedback`, {
+      const res = await fetch(`${getApiBase()}/api/feedback`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rating, message, name, email, source: 'mobile' }),

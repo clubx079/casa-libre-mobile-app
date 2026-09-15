@@ -13,6 +13,7 @@ import {
 import { IBMPlexMono_400Regular, IBMPlexMono_500Medium } from '@expo-google-fonts/ibm-plex-mono';
 import { InstrumentSerif_400Regular_Italic } from '@expo-google-fonts/instrument-serif';
 import { I18nProvider } from '../lib/i18n';
+import { CountryProvider } from '../lib/country';
 import { AuthProvider } from '../lib/session';
 import { colors } from '../lib/theme';
 
@@ -37,6 +38,7 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
+        <CountryProvider>
         <I18nProvider>
          <AuthProvider>
           <StatusBar style="dark" />
@@ -56,6 +58,7 @@ export default function RootLayout() {
           </Stack>
          </AuthProvider>
         </I18nProvider>
+        </CountryProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

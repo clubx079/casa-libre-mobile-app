@@ -1,12 +1,12 @@
 // Share a listing via the OS share sheet.
 import { Pressable, Share } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { MEDIA_BASE } from '../lib/config';
+import { getCountry } from '../lib/country';
 import { colors } from '../lib/theme';
 
 export default function ShareButton({ listing, size = 20, circle = true }) {
   const onShare = async () => {
-    const url = `https://casa-libre.com.py/propiedad/${listing.id}`;
+    const url = `${getCountry().origin}/propiedad/${listing.id}`;
     const title = listing.title || `${listing.type || 'Propiedad'} · ${listing.neighborhood || listing.city || ''}`.trim();
     try {
       await Share.share({ message: `${title}\n${url}`, url, title });

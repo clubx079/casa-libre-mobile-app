@@ -9,11 +9,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, fonts, radii } from '../lib/theme';
 import { useI18n } from '../lib/i18n';
 import { useAuth } from '../lib/session';
-import { API_BASE, MEDIA_BASE } from '../lib/config';
+import { getApiBase, getMediaBase } from '../lib/config';
 import PropertyCard from '../components/PropertyCard';
 import Button from '../components/Button';
 
-const abs = (u) => (!u ? null : u.startsWith('http') ? u : MEDIA_BASE + (u.startsWith('/') ? u : '/' + u));
+const abs = (u) => (!u ? null : u.startsWith('http') ? u : getMediaBase() + (u.startsWith('/') ? u : '/' + u));
 const fixImages = (l) => ({ ...l, image: abs(l.image), images: Array.isArray(l.images) ? l.images.map(abs).filter(Boolean) : [] });
 
 const STATUS_LABEL = { active: 'Activa', pending: 'En revisión', paused: 'Pausada', rejected: 'Rechazada', delisted: 'Dada de baja' };
@@ -28,7 +28,7 @@ export default function MyListings() {
     if (!user) { setLoading(false); return; }
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/account/listings`, { credentials: 'include' });
+      const res = await fetch(`${getApiBase()}/api/account/listings`, { credentials: 'include' });
       const data = await res.json().catch(() => ({}));
       setRows((data.listings || []).map(fixImages));
     } catch { setRows([]); }
@@ -47,7 +47,7 @@ export default function MyListings() {
           text: lang === 'en' ? 'Delete' : 'Eliminar', style: 'destructive',
           onPress: async () => {
             try {
-              await fetch(`${API_BASE}/api/account/listings`, { method: 'DELETE', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+              await fetch(`${getApiBase()}/api/account/listings`, { method: 'DELETE', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
               setRows((prev) => prev.filter((r) => r.id !== id));
             } catch {}
           },

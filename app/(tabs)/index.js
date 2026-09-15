@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
-import { View, Text, TextInput, Pressable, FlatList, ActivityIndicator, RefreshControl, Modal, ScrollView } from 'react-native';
+import { View, Text, TextInput, Pressable, FlatList, ActivityIndicator, RefreshControl, Modal, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, fonts, radii, hardShadow } from '../../lib/theme';
 import { useI18n } from '../../lib/i18n';
+import { useCountry } from '../../lib/country';
 import { fetchListings } from '../../lib/listings';
+import { getUserLocation, distanceKm, NEAR_RADIUS_KM } from '../../lib/geo';
 import { title, typeLabel } from '../../lib/display';
 import PropertyCard from '../../components/PropertyCard';
 import PropertyMap from '../../components/PropertyMap';
@@ -61,6 +63,7 @@ function Dropdown({ label, value, options, onSelect, open, onToggle }) {
 
 export default function Marketplace() {
   const { t, lang, setLang } = useI18n();
+  const { code } = useCountry();
   const [raw, setRaw] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -74,6 +77,10 @@ export default function Marketplace() {
   const [page, setPage] = useState(1);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [openDD, setOpenDD] = useState(null); // which dropdown is expanded
+  // "Near me" — the user's real device coords + a radius filter (mirrors the web).
+  const [nearMe, setNearMe] = useState(false);
+  const [userLoc, setUserLoc] = useState(null); // { latitude, longitude }
+  const [locating, setLocating] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -81,9 +88,27 @@ export default function Marketplace() {
       setRaw(listings);
     } catch { setRaw([]); }
     finally { setLoading(false); setRefreshing(false); }
-  }, [mode]);
+  }, [mode, code]); // refetch against the active country's API when it changes
 
   useEffect(() => { setLoading(true); load(); }, [load]);
+
+  // Request (once) + cache the device location. Returns coords or null; never throws.
+  const requestLocation = useCallback(async () => {
+    if (userLoc) return userLoc;
+    setLocating(true);
+    const loc = await getUserLocation();
+    setLocating(false);
+    if (loc) setUserLoc(loc);
+    else Alert.alert(lang === 'en' ? "We couldn't access your location" : 'No pudimos acceder a tu ubicación');
+    return loc;
+  }, [userLoc, lang]);
+
+  const toggleNearMe = useCallback(async () => {
+    if (nearMe) { setNearMe(false); return; }
+    const loc = userLoc || (await requestLocation());
+    if (!loc) { setNearMe(false); return; }
+    setNearMe(true);
+  }, [nearMe, userLoc, requestLocation]);
 
   const filtered = useMemo(() => {
     let out = raw;
@@ -100,17 +125,29 @@ export default function Marketplace() {
         return priceF === 'lo' ? v < 100000 : priceF === 'mid' ? v >= 100000 && v <= 200000 : v > 200000;
       });
     }
+    // "Near me": keep only listings within NEAR_RADIUS_KM of the user, nearest first.
+    // Same haversine (distanceKm) as the website; overrides the sort dropdown.
+    if (nearMe && userLoc) {
+      const withD = [];
+      for (const l of out) {
+        if (l.lat == null || l.lng == null) continue;
+        const d = distanceKm(userLoc.latitude, userLoc.longitude, l.lat, l.lng);
+        if (d <= NEAR_RADIUS_KM) withD.push([d, l]);
+      }
+      withD.sort((a, b) => a[0] - b[0]);
+      return withD.map((x) => x[1]);
+    }
     const usdVal = (l) => l.usd ?? (l.pyg ? l.pyg / 7500 : 0);
     if (sort === 'precio_asc') out = [...out].sort((a, b) => usdVal(a) - usdVal(b));
     else if (sort === 'precio_desc') out = [...out].sort((a, b) => usdVal(b) - usdVal(a));
     else if (sort === 'area_desc') out = [...out].sort((a, b) => (b.covered || b.area || 0) - (a.covered || a.area || 0));
     return out;
-  }, [raw, q, typeF, bedF, priceF, sort, mode]);
+  }, [raw, q, typeF, bedF, priceF, sort, mode, nearMe, userLoc]);
 
-  const isFiltered = typeF !== 'all' || priceF !== 'all' || bedF !== 'all' || !!q.trim();
+  const isFiltered = typeF !== 'all' || priceF !== 'all' || bedF !== 'all' || !!q.trim() || (nearMe && !!userLoc);
   const activeCount = (typeF !== 'all' ? 1 : 0) + (priceF !== 'all' ? 1 : 0) + (bedF !== 'all' ? 1 : 0) + (sort !== 'relevancia' ? 1 : 0);
 
-  useEffect(() => { setPage(1); }, [q, typeF, priceF, bedF, sort, mode]);
+  useEffect(() => { setPage(1); }, [q, typeF, priceF, bedF, sort, mode, nearMe]);
   const visible = filtered.slice(0, page * PER_PAGE);
 
   const priceOpts = mode === 'alquiler'
@@ -143,10 +180,20 @@ export default function Marketplace() {
         </Pressable>
       </View>
 
-      <View style={{ flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 10 }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', rowGap: 8, paddingHorizontal: 16, paddingBottom: 10 }}>
         <ModeChip k="all" label={t('all')} />
         <ModeChip k="venta" label={t('buy')} />
         <ModeChip k="alquiler" label={t('rent')} />
+        {/* Near me — filters listings to within ~10 km of the user, nearest first. */}
+        <Pressable
+          onPress={toggleNearMe}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: radii.pill, borderWidth: 1.5, borderColor: nearMe ? colors.ink : colors.ink30, backgroundColor: nearMe ? colors.ink : colors.card, marginRight: 8 }}
+        >
+          {locating
+            ? <ActivityIndicator size="small" color={nearMe ? colors.paper : colors.ink} />
+            : <Ionicons name="navigate-outline" size={15} color={nearMe ? colors.paper : colors.ink} style={{ transform: [{ rotate: '45deg' }] }} />}
+          <Text style={{ fontFamily: fonts.sansMed, fontSize: 14, color: nearMe ? colors.paper : colors.ink }}>{lang === 'en' ? 'Near me' : 'Cerca de mí'}</Text>
+        </Pressable>
       </View>
 
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingBottom: 12 }}>
@@ -169,7 +216,7 @@ export default function Marketplace() {
         <MascotLoader />
       ) : view === 'map' ? (
         <View style={{ flex: 1 }}>
-          <PropertyMap listings={filtered} isFiltered={isFiltered} style={{ flex: 1 }} />
+          <PropertyMap listings={filtered} isFiltered={isFiltered} style={{ flex: 1 }} userLocation={userLoc} onLocatePress={requestLocation} locating={locating} />
           <Pressable
             onPress={() => setView('list')}
             style={{ position: 'absolute', bottom: 20, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.ink, borderRadius: radii.pill, paddingVertical: 12, paddingHorizontal: 22, ...hardShadow }}

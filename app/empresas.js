@@ -6,7 +6,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, fonts, radii, hardShadow } from '../lib/theme';
 import { useI18n } from '../lib/i18n';
-import { API_BASE } from '../lib/config';
+import { getApiBase } from '../lib/config';
 import Button from '../components/Button';
 import Wordmark from '../components/Wordmark';
 
@@ -63,7 +63,7 @@ export default function Empresas() {
       return;
     }
     try {
-      const res = await fetch(`${API_BASE}/api/partner-inquiries`, {
+      const res = await fetch(`${getApiBase()}/api/partner-inquiries`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type, name, company, phone, email, city, message, web }),

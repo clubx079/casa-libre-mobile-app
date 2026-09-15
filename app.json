@@ -46,7 +46,8 @@
       ],
       "expo-web-browser",
       "expo-image",
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-localization"
     ],
     "experiments": {
       "typedRoutes": false
