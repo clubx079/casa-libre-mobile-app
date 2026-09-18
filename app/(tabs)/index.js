@@ -65,6 +65,7 @@ export default function Marketplace() {
   const { t, lang, setLang } = useI18n();
   const { code } = useCountry();
   const [raw, setRaw] = useState([]);
+  const [total, setTotal] = useState(0); // true active-inventory total from the API (not the load cap)
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [mode, setMode] = useState('all');
@@ -84,9 +85,10 @@ export default function Marketplace() {
 
   const load = useCallback(async () => {
     try {
-      const { listings } = await fetchListings({ mode: mode === 'all' ? undefined : mode, limit: 600 });
+      const { listings, total } = await fetchListings({ mode: mode === 'all' ? undefined : mode, limit: 600 });
       setRaw(listings);
-    } catch { setRaw([]); }
+      setTotal(total || listings.length);
+    } catch { setRaw([]); setTotal(0); }
     finally { setLoading(false); setRefreshing(false); }
   }, [mode, code]); // refetch against the active country's API when it changes
 
@@ -145,6 +147,12 @@ export default function Marketplace() {
   }, [raw, q, typeF, bedF, priceF, sort, mode, nearMe, userLoc]);
 
   const isFiltered = typeF !== 'all' || priceF !== 'all' || bedF !== 'all' || !!q.trim() || (nearMe && !!userLoc);
+  // Count shown to the user: the real inventory total when just browsing a mode,
+  // or the filtered/near-me set count when any filter is on (never the 600 cap).
+  // `total` is now per-mode accurate from the API, so use it whenever no client-side
+  // filter (type/price/beds/search/near-me) is narrowing the loaded set — on every
+  // tab (all/venta/alquiler), not just "all". Filtered views show the loaded match count.
+  const displayCount = isFiltered ? filtered.length : (total || filtered.length);
   const activeCount = (typeF !== 'all' ? 1 : 0) + (priceF !== 'all' ? 1 : 0) + (bedF !== 'all' ? 1 : 0) + (sort !== 'relevancia' ? 1 : 0);
 
   useEffect(() => { setPage(1); }, [q, typeF, priceF, bedF, sort, mode, nearMe]);
@@ -184,16 +192,6 @@ export default function Marketplace() {
         <ModeChip k="all" label={t('all')} />
         <ModeChip k="venta" label={t('buy')} />
         <ModeChip k="alquiler" label={t('rent')} />
-        {/* Near me — filters listings to within ~10 km of the user, nearest first. */}
-        <Pressable
-          onPress={toggleNearMe}
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: radii.pill, borderWidth: 1.5, borderColor: nearMe ? colors.ink : colors.ink30, backgroundColor: nearMe ? colors.ink : colors.card, marginRight: 8 }}
-        >
-          {locating
-            ? <ActivityIndicator size="small" color={nearMe ? colors.paper : colors.ink} />
-            : <Ionicons name="navigate-outline" size={15} color={nearMe ? colors.paper : colors.ink} style={{ transform: [{ rotate: '45deg' }] }} />}
-          <Text style={{ fontFamily: fonts.sansMed, fontSize: 14, color: nearMe ? colors.paper : colors.ink }}>{lang === 'en' ? 'Near me' : 'Cerca de mí'}</Text>
-        </Pressable>
       </View>
 
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingBottom: 12 }}>
@@ -216,7 +214,7 @@ export default function Marketplace() {
         <MascotLoader />
       ) : view === 'map' ? (
         <View style={{ flex: 1 }}>
-          <PropertyMap listings={filtered} isFiltered={isFiltered} style={{ flex: 1 }} userLocation={userLoc} onLocatePress={requestLocation} locating={locating} />
+          <PropertyMap listings={filtered} isFiltered={isFiltered} style={{ flex: 1 }} userLocation={userLoc} nearMe={nearMe} onToggleNear={toggleNearMe} locating={locating} />
           <Pressable
             onPress={() => setView('list')}
             style={{ position: 'absolute', bottom: 20, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.ink, borderRadius: radii.pill, paddingVertical: 12, paddingHorizontal: 22, ...hardShadow }}
@@ -232,7 +230,7 @@ export default function Marketplace() {
           contentContainerStyle={{ padding: 16, paddingTop: 4 }}
           keyboardShouldPersistTaps="handled"
           renderItem={({ item }) => <PropertyCard listing={item} />}
-          ListHeaderComponent={<Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.ink60, marginBottom: 12 }}>{filtered.length} {t('results')}</Text>}
+          ListHeaderComponent={<Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.ink60, marginBottom: 12 }}>{displayCount} {t('results')}</Text>}
           ListEmptyComponent={<Text style={{ fontFamily: fonts.sans, color: colors.ink60, textAlign: 'center', marginTop: 40 }}>{t('noResults')}</Text>}
           onEndReachedThreshold={0.5}
           onEndReached={() => { if (visible.length < filtered.length) setPage((p) => p + 1); }}
@@ -260,7 +258,7 @@ export default function Marketplace() {
                 <Text style={{ fontFamily: fonts.sansMed, fontSize: 15, color: colors.ink }}>{t('clear')}</Text>
               </Pressable>
               <Pressable onPress={() => setFiltersOpen(false)} style={{ flex: 2, alignItems: 'center', justifyContent: 'center', paddingVertical: 14, borderRadius: radii.pill, backgroundColor: colors.ink, ...hardShadow }}>
-                <Text style={{ fontFamily: fonts.sansBold, fontSize: 15, color: colors.paper }}>{filtered.length} {t('results')}</Text>
+                <Text style={{ fontFamily: fonts.sansBold, fontSize: 15, color: colors.paper }}>{displayCount} {t('results')}</Text>
               </Pressable>
             </View>
           </View>

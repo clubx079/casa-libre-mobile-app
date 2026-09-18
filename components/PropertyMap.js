@@ -79,7 +79,7 @@ function buildHtml(points, center, zoom, single, fitBounds) {
   .gm-style a[title*="Google"], .gm-style img[alt="Google"] { display:none !important; }
   .gm-style-cc { display:none !important; }
 </style></head><body><div id="map"></div>
-<script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@googlemaps/markerclusterer@2.5.3/dist/index.min.js"></script>
 <script>
   var pts = ${data};
   var single = ${single ? 'true' : 'false'};
@@ -142,7 +142,7 @@ function buildHtml(points, center, zoom, single, fitBounds) {
       var icon = single
         ? { url: uri(dotSvg()), scaledSize: new google.maps.Size(16,16), anchor: new google.maps.Point(8,8) }
         : pillIcon(p);
-      var m = new google.maps.Marker({ position:{ lat:p.lat, lng:p.lng }, icon: icon, zIndex: (!single && p.promoted) ? 10000 : undefined });
+      var m = new google.maps.Marker({ position:{ lat:p.lat, lng:p.lng }, icon: icon, optimized: false, zIndex: (!single && p.promoted) ? 10000 : undefined });
       m.addListener('click', function(){ if(window.ReactNativeWebView){ window.ReactNativeWebView.postMessage(p.id); } });
       bounds.extend({ lat:p.lat, lng:p.lng });
       // A paid listing is never swallowed by a cluster — put it straight on the map.
@@ -152,16 +152,41 @@ function buildHtml(points, center, zoom, single, fitBounds) {
     if (single) {
       markers.forEach(function(m){ m.setMap(map); });
     } else if (window.markerClusterer && window.markerClusterer.MarkerClusterer) {
-      new markerClusterer.MarkerClusterer({
+      window.__clCluster = new markerClusterer.MarkerClusterer({
         map: map, markers: clusterMarkers,
         algorithm: new markerClusterer.SuperClusterAlgorithm({ radius: 90, maxZoom: 16 }),
-        renderer: { render: function(o){ return new google.maps.Marker({ position:o.position, zIndex:1000+o.count, icon:{ url: uri(clusterSvg(o.count)), scaledSize: new google.maps.Size(40,40), anchor: new google.maps.Point(20,20) } }); } },
+        renderer: { render: function(o){ return new google.maps.Marker({ position:o.position, zIndex:1000+o.count, optimized: false, icon:{ url: uri(clusterSvg(o.count)), scaledSize: new google.maps.Size(40,40), anchor: new google.maps.Point(20,20) } }); } },
       });
+      // Re-cluster only AFTER the map settles (debounced), never on intermediate zoom
+      // frames. Both our live double-tap zoom and native two-finger pinch emit many
+      // 'idle' events while zooming; the clusterer renders (removes + re-adds pins) on
+      // each → visible flicker. Debouncing collapses them into ONE clean re-cluster once
+      // motion stops, so the pins hold steady through the whole gesture. This replaces
+      // the clusterer's own idle→render binding (and the double-tap-only pause), covering
+      // pinch too.
+      try {
+        var __c = window.__clCluster;
+        if (__c && __c.idleListener) google.maps.event.removeListener(__c.idleListener);
+        var __rt = null;
+        __c.idleListener = map.addListener('idle', function(){
+          if (__rt) clearTimeout(__rt);
+          __rt = setTimeout(function(){ __rt = null; try { __c.render(); } catch(e){} }, 140);
+        });
+      } catch(e){}
     } else {
       clusterMarkers.forEach(function(m){ m.setMap(map); });
     }
     if (${fit} && pts.length > 1) { try { map.fitBounds(bounds, 40); } catch(e){} }
     window.__clMap = map;
+    // A "you are here" fly-to that arrived before the map was ready (WebView reload) — apply it now.
+    if (window.__clPendingYou) { try { __clDrawYou(window.__clPendingYou.lat, window.__clPendingYou.lng); } catch(e){} window.__clPendingYou = null; }
+    // A view-restore queued before the map was ready (near-me deselect) — apply it now.
+    if (window.__clPendingRestore) { try { __clDoRestore(window.__clPendingRestore.lat, window.__clPendingRestore.lng, window.__clPendingRestore.zoom); } catch(e){} window.__clPendingRestore = null; }
+    // Report the map view (center+zoom) to RN on every idle, so it can save the
+    // pre-near-me position and restore it on deselect (mirrors the website).
+    if (!single) { map.addListener('idle', function(){ try { var c = map.getCenter(); if (window.ReactNativeWebView) { window.ReactNativeWebView.postMessage('__view__:' + c.lat() + ',' + c.lng() + ',' + map.getZoom()); } } catch(e){} }); }
+    // Browse map only: a plain tap on the map (not a pin) tells RN to exit near-me.
+    if (!single) { map.addListener('click', function(){ if(window.ReactNativeWebView){ window.ReactNativeWebView.postMessage('__near_off__'); } }); }
     setupDblTapZoom(map);
   }
   // "Double-tap, hold, and drag to zoom" — the native Google Maps one-finger
@@ -184,31 +209,61 @@ function buildHtml(points, center, zoom, single, fitBounds) {
     // ~175px of drag == one zoom level (a comfortable ~150-200px = 1x).
     var TAP_GAP = 300, TAP_DIST = 40, PX_PER_ZOOM = 175, MINZ = 3, MAXZ = 20;
     var lastTapTime = 0, lastTapX = 0, lastTapY = 0;
-    var active = false, originX = 0, originY = 0, startZoom = 0, targetScale = 1, raf = null;
-    function paint(){ raf = null; if (active) el.style.transform = 'scale(' + targetScale + ')'; }
-    function clearTransform(){ el.style.transform = ''; el.style.transformOrigin = ''; el.style.willChange = 'auto'; }
+    var active = false, originX = 0, originY = 0, startZoom = 0, targetScale = 1, raf = null, anchorWorld = null;
+    // The live preview only scales the #map div UP (zoom-in). Zoom-out does NOT
+    // shrink the div — shrinking exposes the blank page behind it (a small map
+    // square with blank margins). Zoom-out instead holds still and commits once on
+    // release via moveCamera (instant), so the wider tiles load a single time.
+    // Counter-scale the fixed-size marker icons so they DON'T grow with the tiles
+    // during the preview (that "pins balloon, then snap back on release" glitch).
+    // Only our SVG-data-URI icons (pins/clusters/you-dot) match; raster map tiles
+    // are untouched. Each icon is centre-anchored, so a centre-origin inverse
+    // scale keeps it the same size AND geo-anchored while the map scales around it.
+    function scaleMarkers(inv){
+      var imgs = el.querySelectorAll('img[src^="data:image/svg"]');
+      for (var i = 0; i < imgs.length; i++) {
+        imgs[i].style.transformOrigin = 'center center';
+        imgs[i].style.transform = inv === 1 ? '' : 'scale(' + inv + ')';
+      }
+    }
+    function paint(){
+      raf = null; if (!active) return;
+      // Drive the REAL map zoom live for BOTH directions (fractional zoom), pinned to the
+      // tap point. No CSS transform anywhere => no transform→render handoff on release =>
+      // no jump on double-tap zoom-in (that little glitch was the CSS-scaled preview
+      // snapping to a freshly-rendered committed zoom). This matches the smooth two-finger
+      // pinch, which is also a real live zoom.
+      var lz = startZoom + Math.log(targetScale) / Math.LN2;   // fractional zoom target
+      lz = Math.max(MINZ, Math.min(MAXZ, lz));
+      var proj = (typeof map.getProjection === 'function') ? map.getProjection() : null;
+      if (anchorWorld && proj) {
+        var s1 = 256 * Math.pow(2, lz);
+        var nx = anchorWorld.x - (anchorWorld.px - anchorWorld.cx) / s1;
+        var ny = anchorWorld.y - (anchorWorld.py - anchorWorld.cy) / s1;
+        try { map.moveCamera({ center: proj.fromPointToLatLng(new google.maps.Point(nx, ny)), zoom: lz }); return; } catch(e){}
+      }
+      try { map.moveCamera({ zoom: lz }); } catch(e){}         // fallback: zoom about center
+    }
+    function clearTransform(){ el.style.transform = ''; el.style.transformOrigin = ''; el.style.willChange = 'auto'; scaleMarkers(1); }
+    // (Clustering flicker is handled at init by debouncing the clusterer's idle→render,
+    // which covers BOTH double-tap and native pinch — see the debounce block in initMap.)
+    // Apply the committed view INSTANTLY with moveCamera() (no zoom animation).
+    // Zoom-in hands off seamlessly from the CSS grow preview; zoom-out (no preview)
+    // jumps straight to the wider view. Either way there is NO multi-level zoom
+    // animation or per-level tile reload (that was the "zoom-out lags a few seconds"
+    // problem). Falls back to setZoom/setCenter only on older Maps builds.
+    function applyView(center, zoom){
+      if (typeof map.moveCamera === 'function') {
+        try { map.moveCamera(center ? { center: center, zoom: zoom } : { zoom: zoom }); return; } catch(e){}
+      }
+      map.setZoom(zoom); if (center) map.setCenter(center);
+    }
     function commit(){
-      var dz = Math.log(targetScale) / Math.LN2;                 // log2(scaleFactor)
-      var newZoom = Math.max(MINZ, Math.min(MAXZ, startZoom + dz));
-      try {
-        var proj = map.getProjection();
-        if (proj) {
-          // Anchor the double-tap point: convert it to a world coord at the old
-          // zoom, then pick the new center that keeps it under the same pixel.
-          var rect = el.getBoundingClientRect();
-          var px = originX - rect.left, py = originY - rect.top;
-          var cx = rect.width / 2, cy = rect.height / 2;
-          var s0 = 256 * Math.pow(2, startZoom), s1 = 256 * Math.pow(2, newZoom);
-          var wc = proj.fromLatLngToPoint(map.getCenter());
-          var ax = wc.x + (px - cx) / s0, ay = wc.y + (py - cy) / s0;
-          var nc = new google.maps.Point(ax - (px - cx) / s1, ay - (py - cy) / s1);
-          map.setZoom(newZoom);
-          map.setCenter(proj.fromPointToLatLng(nc));
-        } else {
-          map.setZoom(newZoom);                                  // fallback: zoom about center
-        }
-      } catch(err) { try { map.setZoom(newZoom); } catch(e2){} }
-      clearTransform();                                          // tiles reload ONCE, at final zoom
+      // Zoom is applied live & anchored during the drag for BOTH directions now, so on
+      // release the map is already at its final view — nothing to re-zoom. Just clean up.
+      // (The old separate moveCamera-on-commit is what caused the little jump on double-
+      // tap zoom-in: the CSS preview handed off to a fresh render at a hair-different spot.)
+      clearTransform();   // clustering re-settles on its own (debounced idle) after release
     }
     el.addEventListener('touchstart', function(e){
       if (e.touches.length !== 1) { if (active) { active = false; clearTransform(); } return; } // 2 fingers => pinch
@@ -221,6 +276,21 @@ function buildHtml(points, center, zoom, single, fitBounds) {
         startZoom = (typeof map.getZoom() === 'number') ? map.getZoom() : ${zoom};
         el.style.transformOrigin = originX + 'px ' + originY + 'px';
         el.style.willChange = 'transform';
+        // Capture the tap point as a zoom-independent world coordinate, so a live
+        // zoom-out can keep exactly that point pinned under the finger (same anchoring
+        // math commit() uses, but applied every frame).
+        anchorWorld = null;
+        try {
+          var proj0 = map.getProjection();
+          if (proj0) {
+            var r0 = el.getBoundingClientRect();
+            var px0 = originX - r0.left, py0 = originY - r0.top;
+            var cx0 = r0.width / 2, cy0 = r0.height / 2;
+            var s00 = 256 * Math.pow(2, startZoom);
+            var wc0 = proj0.fromLatLngToPoint(map.getCenter());
+            anchorWorld = { x: wc0.x + (px0 - cx0) / s00, y: wc0.y + (py0 - cy0) / s00, px: px0, py: py0, cx: cx0, cy: cy0 };
+          }
+        } catch(e){}
         e.preventDefault(); e.stopPropagation();      // suppress Google's own dbl-tap zoom
       } else {
         active = false;
@@ -239,17 +309,32 @@ function buildHtml(points, center, zoom, single, fitBounds) {
     el.addEventListener('touchend', function(){ if (active) { active = false; commit(); } }, { capture: true });
     el.addEventListener('touchcancel', function(){ if (active) { active = false; clearTransform(); } }, { capture: true });
   }
-  // Recenter on the user's location and drop/update a "you are here" marker.
-  // Called from React Native via WebView.injectJavaScript().
-  window.__clFlyTo = function(lat, lng){
+  // Draw / move the "you are here" marker and recenter on it.
+  function __clDrawYou(lat, lng){
     var map = window.__clMap; if (!map) return;
     var p = { lat: lat, lng: lng };
     try { map.panTo(p); map.setZoom(14); } catch(e){}
     if (window.__clYou) { try { window.__clYou.setMap(null); } catch(e){} }
     window.__clYou = new google.maps.Marker({
-      position: p, map: map, zIndex: 99999,
+      position: p, map: map, zIndex: 99999, optimized: false,
       icon: { url: uri(youSvg()), scaledSize: new google.maps.Size(22,22), anchor: new google.maps.Point(11,11) },
     });
+  }
+  // Called from React Native via injectJavaScript(). If the map isn't ready yet —
+  // the WebView reloads whenever near-me changes the pin set — stash the location
+  // and initMap() applies it once the map exists, so the dot never gets lost.
+  window.__clFlyTo = function(lat, lng){
+    if (!window.__clMap) { window.__clPendingYou = { lat: lat, lng: lng }; return; }
+    __clDrawYou(lat, lng);
+  };
+  // Restore a saved center+zoom (near-me deselect). Queues if the map isn't ready.
+  function __clDoRestore(lat, lng, zoom){
+    var map = window.__clMap; if (!map) return;
+    try { map.setZoom(zoom); map.setCenter({ lat: lat, lng: lng }); } catch(e){}
+  }
+  window.__clRestoreView = function(lat, lng, zoom){
+    if (!window.__clMap) { window.__clPendingRestore = { lat: lat, lng: lng, zoom: zoom }; return; }
+    __clDoRestore(lat, lng, zoom);
   };
   window.initMap = initMap;
 </script>
@@ -257,11 +342,15 @@ function buildHtml(points, center, zoom, single, fitBounds) {
 </body></html>`;
 }
 
-export default function PropertyMap({ listings = [], style, single = null, isFiltered = false, onMarkerPress, userLocation = null, onLocatePress, locating = false }) {
+export default function PropertyMap({ listings = [], style, single = null, isFiltered = false, onMarkerPress, userLocation = null, nearMe = false, onToggleNear, locating = false }) {
   const pts = single ? (single.lat && single.lng ? [single] : []) : listings.filter((l) => l.lat && l.lng);
   const webRef = useRef(null);
-  // Show the "locate me" control on the browse map only (not the single-property mini-map).
-  const showLocate = !single && typeof onLocatePress === 'function';
+  const lastViewRef = useRef(null);        // latest {lat,lng,zoom} reported by the map on idle
+  const prevViewRef = useRef(null);         // view saved when near-me is turned ON
+  const pendingRestoreRef = useRef(null);   // view to re-apply after the deselect reload
+  const prevNearRef = useRef(nearMe);       // previous nearMe, to detect on/off transitions
+  // Show the "near me" triangle toggle on the browse map only (not the single-property mini-map).
+  const showLocate = !single && typeof onToggleNear === 'function';
 
   const country = getCountry();
   const html = useMemo(() => {
@@ -281,15 +370,32 @@ export default function PropertyMap({ listings = [], style, single = null, isFil
     webRef.current.injectJavaScript(`window.__clFlyTo && window.__clFlyTo(${lat}, ${lng}); true;`);
   };
 
-  // Recenter whenever the shared user location changes (e.g. "Near me" from the list).
-  useEffect(() => { if (showLocate && userLocation) flyTo(userLocation); }, [userLocation?.latitude, userLocation?.longitude]);
-
-  const handleLocate = async () => {
-    const loc = (await onLocatePress?.()) || userLocation;
-    if (loc) flyTo(loc);
+  const restoreView = (v) => {
+    if (!v || !webRef.current) return;
+    webRef.current.injectJavaScript(`window.__clRestoreView && window.__clRestoreView(${v.lat}, ${v.lng}, ${v.zoom}); true;`);
   };
 
-  if (!pts.length) {
+  // When near-me turns on (or the user's coords arrive), fly to them + drop the dot.
+  useEffect(() => { if (nearMe && userLocation) flyTo(userLocation); }, [nearMe, userLocation?.latitude, userLocation?.longitude]);
+
+  // Save the map view when near-me turns ON; queue a restore of it when it turns OFF
+  // (the WebView reloads on toggle, so the actual restore runs in onLoadEnd). Mirrors
+  // the website's prevViewRef save/restore.
+  useEffect(() => {
+    const was = prevNearRef.current;
+    if (!was && nearMe) {
+      prevViewRef.current = lastViewRef.current;
+    } else if (was && !nearMe && prevViewRef.current) {
+      pendingRestoreRef.current = prevViewRef.current;
+      prevViewRef.current = null;
+    }
+    prevNearRef.current = nearMe;
+  }, [nearMe]);
+
+  // Only the single-property mini-map falls back to a placeholder when it has no
+  // coords. The browse map ALWAYS renders (with the triangle) — even when a filter
+  // (e.g. near-me far from any listing) yields zero pins — so you can still deselect.
+  if (!pts.length && !showLocate) {
     return (
       <View style={[{ backgroundColor: colors.hatch, alignItems: 'center', justifyContent: 'center', padding: 20 }, style]}>
         <Text style={{ fontFamily: fonts.mono, color: colors.ink60, fontSize: 12 }}>Sin ubicación</Text>
@@ -298,10 +404,20 @@ export default function PropertyMap({ listings = [], style, single = null, isFil
   }
 
   const onMessage = (e) => {
-    const id = e?.nativeEvent?.data;
-    if (!id) return;
-    if (onMarkerPress) onMarkerPress(id);
-    else router.push(`/property/${id}`);
+    const data = e?.nativeEvent?.data;
+    if (!data) return;
+    // The map reports its center+zoom on every idle → keep the latest so we can
+    // save it when near-me turns on and restore it on deselect.
+    if (data.indexOf('__view__:') === 0) {
+      const p = data.slice(9).split(',');
+      const lat = Number(p[0]), lng = Number(p[1]), zoom = Number(p[2]);
+      if (Number.isFinite(lat) && Number.isFinite(lng) && Number.isFinite(zoom)) lastViewRef.current = { lat, lng, zoom };
+      return;
+    }
+    // A tap on the empty map (not a pin) exits near-me — mirrors the website.
+    if (data === '__near_off__') { if (nearMe && onToggleNear) onToggleNear(); return; }
+    if (onMarkerPress) onMarkerPress(data);
+    else router.push(`/property/${data}`);
   };
 
   return (
@@ -314,22 +430,31 @@ export default function PropertyMap({ listings = [], style, single = null, isFil
         javaScriptEnabled
         domStorageEnabled
         onMessage={onMessage}
+        // The HTML re-memoizes when near-me changes the pin set, so the WebView
+        // reloads. After each (re)load: if near-me is on, re-drop the "you are here"
+        // dot; if it just turned off, restore the pre-near-me view (like the website).
+        onLoadEnd={() => {
+          if (nearMe && userLocation) flyTo(userLocation);
+          else if (!nearMe && pendingRestoreRef.current) { const v = pendingRestoreRef.current; pendingRestoreRef.current = null; restoreView(v); }
+        }}
         setSupportMultipleWindows={false}
         androidLayerType="hardware"
       />
       {showLocate ? (
         <Pressable
-          onPress={handleLocate}
-          accessibilityLabel="My location"
+          onPress={onToggleNear}
+          accessibilityLabel={nearMe ? 'Near me (on)' : 'Near me'}
           hitSlop={8}
           style={({ pressed }) => [{
             position: 'absolute', right: 16, bottom: 92,
             width: 44, height: 44, borderRadius: 22,
             backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center',
+            // Selected = white button with an ink ring (matches the website).
+            borderWidth: nearMe ? 2 : 0, borderColor: colors.ink,
             ...locateShadow,
           }, pressed && { transform: [{ translateY: 1 }] }]}
         >
-          {locating ? <ActivityIndicator size="small" color={LOCATE_INK} /> : <NavTriangle size={19} color={LOCATE_INK} />}
+          {locating ? <ActivityIndicator size="small" color={LOCATE_INK} /> : <NavTriangle size={19} color={nearMe ? colors.ink : LOCATE_INK} />}
         </Pressable>
       ) : null}
     </View>

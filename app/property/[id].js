@@ -105,9 +105,19 @@ export default function PropertyDetail() {
         <Pressable onPress={() => router.back()} hitSlop={12} style={{ padding: 6 }}>
           <Ionicons name="arrow-back" size={24} color={colors.ink} />
         </Pressable>
-        <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.ink45, marginLeft: 4 }} numberOfLines={1}>
-          {t('listings')} / {l.city || l.neighborhood || ''}
-        </Text>
+        {/* Breadcrumb kept on ONE line but horizontally scrollable, so a long
+            street/neighborhood name isn't cut off — drag it sideways to read it all. */}
+        <ScrollView
+          horizontal
+          style={{ flex: 1, marginLeft: 4 }}
+          contentContainerStyle={{ alignItems: 'center', paddingRight: 12 }}
+          showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.ink45 }} numberOfLines={1}>
+            {t('listings')} / {l.city || l.neighborhood || ''}
+          </Text>
+        </ScrollView>
       </View>
 
       <Animated.ScrollView ref={scrollRef} onScroll={onScroll} scrollEventThrottle={16} contentContainerStyle={{ padding: 16, paddingBottom: 120 }} showsVerticalScrollIndicator={false}>

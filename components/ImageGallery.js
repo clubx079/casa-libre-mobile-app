@@ -28,15 +28,16 @@ export default function ImageGallery({ images = [], badge, topRight }) {
   // Reset the drag transform every time the viewer opens.
   useEffect(() => { if (open) { ty.value = 0; tx.value = 0; } }, [open]);
 
-  // Swipe DOWN to dismiss. Only engages on a mostly-vertical drag (failOffsetX),
-  // so horizontal swipes still page the gallery.
+  // Swipe DOWN *or* UP to dismiss. Engages on a mostly-vertical drag in either
+  // direction (failOffsetX keeps horizontal swipes paging the gallery).
   const panDown = Gesture.Pan()
-    .activeOffsetY(14)
+    .activeOffsetY([-14, 14])
     .failOffsetX([-18, 18])
     .onUpdate((e) => { ty.value = e.translationY; })
     .onEnd((e) => {
-      if (e.translationY > DISMISS_DY || e.velocityY > 850) {
-        ty.value = withTiming(SH, { duration: 180 }, () => runOnJS(close)());
+      if (Math.abs(e.translationY) > DISMISS_DY || Math.abs(e.velocityY) > 850) {
+        const dir = (e.translationY || e.velocityY) < 0 ? -1 : 1; // fling off the nearer edge
+        ty.value = withTiming(dir * SH, { duration: 180 }, () => runOnJS(close)());
       } else {
         ty.value = withSpring(0, { damping: 20, stiffness: 200 });
       }
