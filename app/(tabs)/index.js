@@ -12,6 +12,7 @@ import PropertyCard from '../../components/PropertyCard';
 import PropertyMap from '../../components/PropertyMap';
 import Wordmark from '../../components/Wordmark';
 import MascotLoader from '../../components/MascotLoader';
+import BottomSheet from '../../components/BottomSheet';
 
 const norm = (s) => (s || '').toString().normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
@@ -239,10 +240,7 @@ export default function Marketplace() {
       )}
 
       {/* Filters popup */}
-      <Modal visible={filtersOpen} transparent animationType="slide" onRequestClose={() => setFiltersOpen(false)}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(17,17,17,0.4)', justifyContent: 'flex-end' }}>
-          <View style={{ backgroundColor: colors.paper, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '85%', paddingTop: 8 }}>
-            <View style={{ alignItems: 'center', paddingVertical: 8 }}><View style={{ width: 42, height: 5, borderRadius: 3, backgroundColor: colors.ink12 }} /></View>
+      <BottomSheet visible={filtersOpen} onClose={() => setFiltersOpen(false)}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingBottom: 8 }}>
               <Text style={{ fontFamily: fonts.sansBold, fontSize: 20, color: colors.ink }}>{t('filters')}</Text>
               <Pressable onPress={() => setFiltersOpen(false)} hitSlop={10}><Ionicons name="close" size={24} color={colors.ink} /></Pressable>
@@ -261,9 +259,7 @@ export default function Marketplace() {
                 <Text style={{ fontFamily: fonts.sansBold, fontSize: 15, color: colors.paper }}>{displayCount} {t('results')}</Text>
               </Pressable>
             </View>
-          </View>
-        </View>
-      </Modal>
+      </BottomSheet>
     </SafeAreaView>
   );
 }

@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
+import * as Linking from 'expo-linking';
 import { auth, useAuth } from '../lib/session';
 import { colors, fonts, radii } from '../lib/theme';
 import { useI18n } from '../lib/i18n';
@@ -59,11 +60,23 @@ export default function Auth() {
   };
 
   const onGoogle = async () => {
+    setError('');
     try {
-      const { ok, data } = await auth.googleUrl();
-      if (ok && data.url) await WebBrowser.openAuthSessionAsync(data.url);
+      // Deep link the site's OAuth callback returns to (casalibre://auth in a build,
+      // exp://…/--/auth in Expo Go). openAuthSessionAsync closes the browser and hands
+      // us that URL, carrying the one-time session token to exchange for the cookie.
+      const redirectUrl = Linking.createURL('auth');
+      const { ok, data } = await auth.googleUrl(redirectUrl);
+      if (!ok || !data?.url) { setError(lang === 'en' ? 'Google sign-in unavailable' : 'Google no disponible'); return; }
+      const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
+      if (result.type !== 'success' || !result.url) return; // user cancelled / dismissed
+      const token = Linking.parse(result.url).queryParams?.token;
+      if (!token) { setError(lang === 'en' ? 'Google sign-in failed' : 'No se pudo iniciar con Google'); return; }
+      const ex = await auth.mobileExchange(String(token));
+      if (ex.ok) { await refresh(); router.back(); return; }
+      setError(lang === 'en' ? 'Google sign-in failed' : 'No se pudo iniciar con Google');
     } catch {
-      // ignore
+      setError(lang === 'en' ? 'Google sign-in failed' : 'No se pudo iniciar con Google');
     }
   };
 

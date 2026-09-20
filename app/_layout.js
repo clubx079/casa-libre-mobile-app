@@ -16,6 +16,7 @@ import { I18nProvider } from '../lib/i18n';
 import { CountryProvider } from '../lib/country';
 import { AuthProvider } from '../lib/session';
 import { colors } from '../lib/theme';
+import UpdateGate from '../components/UpdateGate';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -42,6 +43,11 @@ export default function RootLayout() {
         <I18nProvider>
          <AuthProvider>
           <StatusBar style="dark" />
+          {/* UpdateGate wraps the whole navigator: on startup/foreground it
+              enforces the minimum supported native version (blocking wall) and
+              surfaces soft update / OTA prompts. Mounted inside the providers so
+              it can read the active country (→ origin) and i18n. */}
+          <UpdateGate>
           <Stack
             screenOptions={{
               headerShown: false,
@@ -64,6 +70,7 @@ export default function RootLayout() {
             <Stack.Screen name="feedback" options={{ presentation: 'modal' }} />
             <Stack.Screen name="auth" options={{ presentation: 'modal' }} />
           </Stack>
+          </UpdateGate>
          </AuthProvider>
         </I18nProvider>
         </CountryProvider>

@@ -12,9 +12,11 @@ import { Linking } from 'react-native';
 import { Image } from 'expo-image';
 import { colors, fonts, radii } from '../../lib/theme';
 import { useI18n } from '../../lib/i18n';
-import { useAuth } from '../../lib/session';
+import { useAuth, auth } from '../../lib/session';
 import { getApiBase } from '../../lib/config';
+import { useCountry } from '../../lib/country';
 import Button from '../../components/Button';
+import NeighborhoodAutocomplete from '../../components/NeighborhoodAutocomplete';
 
 // ── Module-scope UI helpers (defining these inside the component would remount
 // every TextInput on each keystroke — that's the "keyboard closes after 1 word" bug).
@@ -35,21 +37,38 @@ function Chip({ active, label, onPress }) {
     </Pressable>
   );
 }
-// Square checkbox row (no prices shown — paid options only steer the publish route).
-function CheckRow({ checked, label, onToggle }) {
+// Selectable plan card (radio) — mirrors the website's plan boxes: title + price +
+// one-line benefit, a filled radio when chosen, optional "Recommended" badge.
+function PlanCard({ on, onPress, title, price, sub, recommended }) {
   return (
-    <Pressable onPress={onToggle} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10 }}>
-      <View style={{ width: 24, height: 24, borderRadius: 7, borderWidth: 1.5, borderColor: colors.ink, backgroundColor: checked ? colors.ink : colors.card, alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
-        {checked ? <Ionicons name="checkmark" size={16} color={colors.paper} /> : null}
+    <Pressable
+      onPress={onPress}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1.5, borderColor: on ? colors.ink : colors.ink12, backgroundColor: on ? colors.card : colors.paper, borderRadius: 14, padding: 13, marginBottom: 10 }}
+    >
+      <View style={{ width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: on ? colors.ink : colors.ink30, alignItems: 'center', justifyContent: 'center' }}>
+        {on ? <View style={{ width: 11, height: 11, borderRadius: 6, backgroundColor: colors.ink }} /> : null}
       </View>
-      <Text style={{ flex: 1, fontFamily: fonts.sansMed, fontSize: 15, color: colors.ink }}>{label}</Text>
+      <View style={{ flex: 1 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <Text style={{ fontFamily: fonts.sansBold, fontSize: 15, color: colors.ink }}>{title}</Text>
+          {recommended ? (
+            <View style={{ backgroundColor: colors.ink, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
+              <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.paper, textTransform: 'uppercase', letterSpacing: 0.5 }}>{recommended}</Text>
+            </View>
+          ) : null}
+        </View>
+        {sub ? <Text style={{ fontFamily: fonts.sans, fontSize: 12, color: colors.ink60, marginTop: 2 }}>{sub}</Text> : null}
+      </View>
+      {price ? <Text style={{ fontFamily: fonts.sansBold, fontSize: 13, color: colors.ink70 }}>{price}</Text> : null}
     </Pressable>
   );
 }
 
 export default function Publish() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
+  const es = lang !== 'en';
   const { user, loading } = useAuth();
+  const { country } = useCountry();
 
   const [mode, setMode] = useState('venta');
   const [ptype, setPtype] = useState('casa');
@@ -62,8 +81,9 @@ export default function Publish() {
   const [contactPhone, setContactPhone] = useState('');
   const [description, setDescription] = useState('');
   const [photos, setPhotos] = useState([]);
-  const [wantVerified, setWantVerified] = useState(false); // paid: Verified on marketplace
-  const [wantHome, setWantHome] = useState(false);         // paid: Display on home page
+  const [coords, setCoords] = useState(null); // { latitude, longitude } from the address pick
+  const [formKey, setFormKey] = useState(0);  // bump to remount the autocomplete on reset
+  const [plan, setPlan] = useState('free'); // 'free' | 'verified' | 'home' — paid plans finish on the website
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(null);
@@ -97,7 +117,6 @@ export default function Publish() {
           <Text style={{ fontFamily: fonts.sans, fontSize: 15, color: colors.ink70, textAlign: 'center' }}>{t('publishedOk')}</Text>
           <Text style={{ fontFamily: fonts.mono, fontSize: 14, color: colors.ink60 }}>{t('ref')}: {done.ref}</Text>
           <View style={{ alignSelf: 'stretch', gap: 12, marginTop: 8 }}>
-            <Button label={t('viewMine')} onPress={() => Alert.alert(t('comingSoon'))} />
             <Button label={t('publishAnother')} variant="outline" onPress={resetForm} />
           </View>
         </View>
@@ -108,7 +127,14 @@ export default function Publish() {
   function resetForm() {
     setMode('venta'); setPtype('casa'); setNeighborhood(''); setCity('Asunción'); setPrice('');
     setCurrency('US$'); setArea(''); setContactName(user?.full_name || ''); setContactPhone('');
-    setDescription(''); setPhotos([]); setWantVerified(false); setWantHome(false); setError(''); setDone(null);
+    setDescription(''); setPhotos([]); setCoords(null); setPlan('free'); setError(''); setDone(null); setFormKey((k) => k + 1);
+  }
+  // Map picker result → fill neighborhood + city + precise coordinates.
+  function onPickLocation({ neighborhood: nh, city: cy, latitude, longitude }) {
+    if (nh) setNeighborhood(nh);
+    if (cy) setCity(cy);
+    if (latitude != null && longitude != null) setCoords({ latitude, longitude });
+    setError('');
   }
   async function addPhotos() {
     try {
@@ -129,20 +155,30 @@ export default function Publish() {
     if (mode === 'venta' && currency === 'US$' && priceNum < 5000) return 'Mín. US$ 5.000';
     if (mode === 'alquiler' && currency === 'Gs' && priceNum < 300000) return 'Mín. Gs 300.000/mes';
     if (ptype !== 'terreno' && (!areaNum || areaNum < 5 || areaNum > 2000)) return '5 – 2000 m²';
+    if (!contactName.trim()) return es ? 'Ingresá tu nombre' : 'Enter your name';
     if (digits.length < 6) return t('contactPhone');
-    if (photos.length < 1) return t('addPhotos');
+    if (photos.length < 1) return es ? 'Agregá al menos 1 foto' : 'Add at least 1 photo';
     return '';
   }
-  async function submit() {
-    // Paid visibility (Verified / Home page) is sold + charged on the website only.
-    // If either box is checked, don't publish from the app — send the user to the
-    // web publish page to complete payment there. No payment logic lives in the app.
-    if (wantVerified || wantHome) {
-      const url = `${getApiBase()}/publicar`;
-      try { await WebBrowser.openBrowserAsync(url); }
-      catch { Linking.openURL(url).catch(() => {}); }
-      return;
+  // Open the web Stripe payment for a specific listing + plan, already signed in via
+  // a one-shot handoff (the browser doesn't share the app's login). The web page
+  // auto-opens the Stripe modal from ?pay=<id>&plan=<plan>.
+  async function openStripe(id, pl) {
+    const next = id ? `/cuenta/publicaciones?pay=${id}&plan=${pl}` : '/cuenta/publicaciones';
+    const fallback = `${getApiBase()}${next}`;
+    try {
+      const { ok, data } = await auth.handoff(next);
+      await WebBrowser.openBrowserAsync(ok && data?.url ? data.url : fallback);
+    } catch {
+      try { await WebBrowser.openBrowserAsync(fallback); } catch { Linking.openURL(fallback).catch(() => {}); }
     }
+  }
+
+  async function submit() {
+    // ALWAYS publish (free) first so the listing is saved + live immediately — no
+    // data is lost. If a paid plan was chosen, we then hand off to the website
+    // (signed in) to pay for the Verified / Home-page upgrade (in-app sale of these
+    // is forbidden by Apple/Google). Promotion is applied on the web after payment.
     const msg = validate();
     if (msg) { setError(msg); return; }
     setError(''); setSubmitting(true);
@@ -155,16 +191,36 @@ export default function Publish() {
       fd.append('price', String(Number((price || '').replace(/[^\d.]/g, ''))));
       fd.append('currency', currency === 'Gs' ? 'PYG' : 'USD');
       fd.append('area', String(Number((area || '').replace(/[^\d.]/g, '')) || 0));
+      if (coords) { fd.append('latitude', String(coords.latitude)); fd.append('longitude', String(coords.longitude)); }
       fd.append('description', description.trim());
       fd.append('contact_name', contactName.trim());
       fd.append('contact_phone', (contactPhone || '').replace(/\D/g, ''));
-      photos.forEach((a, i) => fd.append('photos', { uri: a.uri, name: `photo${i}.jpg`, type: 'image/jpeg' }));
+      // Expo SDK 57 / RN 0.86 uses the spec FormData, which rejects the classic
+      // { uri, name, type } file part ("Unsupported FormDataPart implementation").
+      // Append a real Blob read from each photo's uri instead.
+      for (let i = 0; i < photos.length; i++) {
+        try {
+          const rb = await fetch(photos[i].uri);
+          const blob = await rb.blob();
+          fd.append('photos', blob, `photo${i}.jpg`);
+        } catch { /* skip a photo that can't be read */ }
+      }
       const res = await fetch(`${getApiBase()}/api/publish`, { method: 'POST', credentials: 'include', body: fd });
       const data = await res.json().catch(() => ({}));
-      if (res.ok && (data.ref || data.ok)) setDone({ ref: data.ref || 'CL-…' });
-      else setError((data && data.error) || 'No se pudo publicar. Intentá de nuevo.');
+      if (res.ok && (data.ref || data.ok)) {
+        if (plan !== 'free') {
+          // Published free; go STRAIGHT to the Stripe payment on the web for this
+          // listing + the plan already chosen — no in-app success screen.
+          await openStripe(data.id, plan);
+          resetForm();
+        } else {
+          setDone({ ref: data.ref || 'CL-…' });
+        }
+      } else {
+        setError((data && data.error) || (es ? 'No se pudo publicar. Intentá de nuevo.' : 'Could not publish. Try again.'));
+      }
     } catch {
-      setError('Error de red. Intentá de nuevo.');
+      setError(es ? 'Error de red. Intentá de nuevo.' : 'Network error. Try again.');
     } finally { setSubmitting(false); }
   }
 
@@ -196,7 +252,21 @@ export default function Publish() {
 
           <Field>
             <Label>{t('neighborhood')}</Label>
-            <TextInput value={neighborhood} onChangeText={setNeighborhood} placeholder="Villa Morra" placeholderTextColor={colors.ink45} style={inputStyle} />
+            <NeighborhoodAutocomplete
+              key={formKey}
+              value={neighborhood}
+              placeholder="Villa Morra, Recoleta…"
+              origin={country?.origin}
+              countryCode={country?.code}
+              lang={lang}
+              onChangeText={setNeighborhood}
+              onPick={onPickLocation}
+            />
+            {coords ? (
+              <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.ink45, marginTop: 6 }}>
+                📍 {coords.latitude.toFixed(5)}, {coords.longitude.toFixed(5)}
+              </Text>
+            ) : null}
           </Field>
 
           <Field>
@@ -248,7 +318,7 @@ export default function Publish() {
               <Button label={t('addPhotos')} variant="outline" icon={<Ionicons name="images-outline" size={18} color={colors.ink} />} onPress={addPhotos} style={{ alignSelf: 'stretch', backgroundColor: colors.card }} />
             </View>
             {photos.length > 0 ? (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingTop: 4, paddingRight: 4 }}>
                 {photos.map((item, index) => (
                   <View key={`${item.uri}-${index}`} style={{ marginRight: 10 }}>
                     <Image source={{ uri: item.uri }} style={{ width: 84, height: 84, borderRadius: 12, backgroundColor: colors.hatch }} contentFit="cover" />
@@ -257,7 +327,7 @@ export default function Publish() {
                         <Ionicons name="star" size={11} color={colors.paper} />
                       </View>
                     ) : null}
-                    <Pressable onPress={() => removePhoto(index)} hitSlop={8} style={{ position: 'absolute', top: -6, right: -6, width: 22, height: 22, borderRadius: 11, backgroundColor: colors.ink, alignItems: 'center', justifyContent: 'center' }}>
+                    <Pressable onPress={() => removePhoto(index)} hitSlop={8} style={{ position: 'absolute', top: 4, right: 4, width: 22, height: 22, borderRadius: 11, backgroundColor: colors.ink, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: colors.paper }}>
                       <Ionicons name="close" size={14} color={colors.paper} />
                     </Pressable>
                   </View>
@@ -267,15 +337,18 @@ export default function Publish() {
           </Field>
 
           <Field>
-            <Label>{t('addVisibility')}</Label>
-            <View style={{ borderWidth: 1.5, borderColor: colors.ink12, borderRadius: 14, backgroundColor: colors.card, paddingHorizontal: 14, paddingVertical: 4 }}>
-              <CheckRow checked={wantVerified} label={t('optVerified')} onToggle={() => setWantVerified((v) => !v)} />
-              <View style={{ height: 1, backgroundColor: colors.ink12 }} />
-              <CheckRow checked={wantHome} label={t('optHome')} onToggle={() => setWantHome((v) => !v)} />
-            </View>
-            {(wantVerified || wantHome) ? (
-              <Text style={{ fontFamily: fonts.sans, fontSize: 12, color: colors.ink45, marginTop: 8 }}>{t('paidHint')}</Text>
-            ) : null}
+            <Label>{es ? 'Visibilidad (opcional)' : 'Visibility (optional)'}</Label>
+            <PlanCard
+              on={plan === 'verified'} onPress={() => setPlan((p) => (p === 'verified' ? 'free' : 'verified'))}
+              title={es ? 'Verificada' : 'Verified'} price={es ? '30 días' : '30 days'}
+              sub={es ? 'Insignia Verificada en el marketplace' : 'Verified badge on the marketplace'}
+            />
+            <PlanCard
+              on={plan === 'home'} onPress={() => setPlan((p) => (p === 'home' ? 'free' : 'home'))}
+              title={es ? 'En la portada' : 'On the home page'} price={es ? '30 días' : '30 days'}
+              sub={es ? 'Portada + insignia Verificada' : 'Home page + Verified badge'}
+              recommended={es ? 'Recomendado' : 'Recommended'}
+            />
           </Field>
 
           {error ? <Text style={{ fontFamily: fonts.sansMed, fontSize: 14, color: colors.danger, marginBottom: 12 }}>{error}</Text> : null}
@@ -283,6 +356,7 @@ export default function Publish() {
           <Button label={t('publishBtn')} loading={submitting} onPress={submit} />
         </ScrollView>
       </KeyboardAvoidingView>
+
     </SafeAreaView>
   );
 }

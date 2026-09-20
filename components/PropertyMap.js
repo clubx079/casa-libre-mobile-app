@@ -185,8 +185,8 @@ function buildHtml(points, center, zoom, single, fitBounds) {
     // Report the map view (center+zoom) to RN on every idle, so it can save the
     // pre-near-me position and restore it on deselect (mirrors the website).
     if (!single) { map.addListener('idle', function(){ try { var c = map.getCenter(); if (window.ReactNativeWebView) { window.ReactNativeWebView.postMessage('__view__:' + c.lat() + ',' + c.lng() + ',' + map.getZoom()); } } catch(e){} }); }
-    // Browse map only: a plain tap on the map (not a pin) tells RN to exit near-me.
-    if (!single) { map.addListener('click', function(){ if(window.ReactNativeWebView){ window.ReactNativeWebView.postMessage('__near_off__'); } }); }
+    // Near-me stays on until the user taps the triangle again — tapping elsewhere
+    // on the map must NOT deselect it (previously a map 'click' exited near-me).
     setupDblTapZoom(map);
   }
   // "Double-tap, hold, and drag to zoom" — the native Google Maps one-finger

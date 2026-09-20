@@ -1,6 +1,6 @@
 // Account tab — signed-out promo + quick links, or signed-in profile editor.
 import { useEffect, useState, useCallback } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, ActivityIndicator, ToastAndroid, Alert, Platform, KeyboardAvoidingView } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, ActivityIndicator, ToastAndroid, Alert, Platform, KeyboardAvoidingView, Modal } from 'react-native';
 import MascotLoader from '../../components/MascotLoader';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, router } from 'expo-router';
@@ -12,6 +12,7 @@ import { useCountry, SUPPORTED, PROFILES } from '../../lib/country';
 import { getApiBase } from '../../lib/config';
 import Button from '../../components/Button';
 import Wordmark from '../../components/Wordmark';
+import BottomSheet from '../../components/BottomSheet';
 
 function toast(msg) {
   if (Platform.OS === 'android') ToastAndroid.show(msg, ToastAndroid.SHORT);
@@ -54,29 +55,79 @@ function LangToggle() {
   );
 }
 
-// Country switcher — mirrors the web's per-country model. Persists the choice
-// (AsyncStorage, via CountryProvider) and re-renders the app against that country.
+// Country switcher — mirrors the web's per-country model. The row shows the
+// CURRENTLY selected country and opens a bottom-sheet picker (scales to many
+// countries, unlike a row of pills). Persists the choice (AsyncStorage, via
+// CountryProvider) and re-renders the whole app against that country.
 function CountrySelector() {
   const { code, setCountry } = useCountry();
+  const { lang } = useI18n();
+  const es = lang !== 'en';
+  const [open, setOpen] = useState(false);
+  const active = PROFILES[code] || PROFILES.py;
+
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, paddingHorizontal: 4 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        <Ionicons name="globe-outline" size={20} color={colors.ink} />
-        <Text style={{ fontFamily: fonts.sans, fontSize: 16, color: colors.ink }}>País / Country</Text>
-      </View>
-      <View style={{ flexDirection: 'row', borderWidth: 1.5, borderColor: colors.ink, borderRadius: radii.pill, overflow: 'hidden' }}>
-        {SUPPORTED.map((c) => {
-          const on = c === code;
-          return (
-            <Pressable key={c} onPress={() => setCountry(c)} style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: on ? colors.ink : 'transparent' }}>
-              <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: on ? colors.paper : colors.ink, letterSpacing: 0.5 }}>
-                {PROFILES[c].flag} {c.toUpperCase()}
-              </Text>
-            </Pressable>
-          );
+    <>
+      {/* Row: label + the selected country + chevron. Tapping opens the picker. */}
+      <Pressable
+        onPress={() => setOpen(true)}
+        style={({ pressed }) => ({
+          flexDirection: 'row', alignItems: 'center', gap: 12,
+          paddingVertical: 14, paddingHorizontal: 4,
+          borderBottomWidth: 1, borderBottomColor: colors.ink08,
+          opacity: pressed ? 0.6 : 1,
         })}
-      </View>
-    </View>
+      >
+        <Ionicons name="globe-outline" size={20} color={colors.ink} />
+        <Text style={{ flex: 1, fontFamily: fonts.sans, fontSize: 16, color: colors.ink }}>{es ? 'País' : 'Country'}</Text>
+        <Text style={{ fontSize: 17, marginRight: 2 }}>{active.flag}</Text>
+        <Text style={{ fontFamily: fonts.sansBold, fontSize: 15, color: colors.ink, marginRight: 4 }}>{active.name}</Text>
+        <Ionicons name="chevron-down" size={16} color={colors.ink30} />
+      </Pressable>
+
+      <BottomSheet visible={open} onClose={() => setOpen(false)}>
+        <View style={{ paddingHorizontal: 18, paddingBottom: 34, paddingTop: 4 }}>
+            <Text style={{ fontFamily: fonts.sansBold, fontSize: 20, color: colors.ink, marginBottom: 3 }}>
+              {es ? 'Elegí tu país' : 'Choose your country'}
+            </Text>
+            <Text style={{ fontFamily: fonts.sans, fontSize: 13, color: colors.ink60, marginBottom: 16 }}>
+              {es ? 'Verás propiedades y precios de este país.' : "You'll see listings and prices from this country."}
+            </Text>
+            <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
+              {SUPPORTED.map((c) => {
+                const p = PROFILES[c];
+                const on = c === code;
+                return (
+                  <Pressable
+                    key={c}
+                    onPress={() => { setCountry(c); setOpen(false); }}
+                    style={({ pressed }) => ({
+                      flexDirection: 'row', alignItems: 'center', gap: 14,
+                      paddingVertical: 13, paddingHorizontal: 14, marginBottom: 8,
+                      borderRadius: 16,
+                      borderWidth: 1.5, borderColor: on ? colors.ink : colors.ink12,
+                      backgroundColor: on ? colors.card : (pressed ? colors.ink08 : 'transparent'),
+                    })}
+                  >
+                    <Text style={{ fontSize: 26 }}>{p.flag}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontFamily: fonts.sansBold, fontSize: 16, color: colors.ink }}>{p.name}</Text>
+                      <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.ink60, marginTop: 1 }}>
+                        {p.capital} · {p.currencyCode}
+                      </Text>
+                    </View>
+                    <Ionicons
+                      name={on ? 'checkmark-circle' : 'ellipse-outline'}
+                      size={23}
+                      color={on ? colors.ink : colors.ink30}
+                    />
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+        </View>
+      </BottomSheet>
+    </>
   );
 }
 
