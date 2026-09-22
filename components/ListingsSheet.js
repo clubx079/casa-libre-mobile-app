@@ -130,7 +130,7 @@ const ListingsSheet = forwardRef(function ListingsSheet({
   const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: sheetY.value }] }));
   // The full-state header rows grow in between the half and full snaps.
   const hdrStyle = useAnimatedStyle(() => {
-    const p = interpolate(sheetY.value, [half, full], [0, 1], Extrapolation.CLAMP);
+    const p = interpolate(sheetY.value, [full, half], [1, 0], Extrapolation.CLAMP);
     return { height: hdrH.value * p, opacity: p };
   });
 
