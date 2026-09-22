@@ -117,7 +117,7 @@ export default function Marketplace() {
   const [previewIdx, setPreviewIdx] = useState(0);
 
   const sheetY = useSharedValue(10000);
-  const snaps = sheetSnaps(H, insets.top);
+  const snaps = sheetSnaps(H);
   const previewRef = useRef(null); previewRef.current = preview;
   const snapRef = useRef('collapsed'); snapRef.current = snap;
 
@@ -272,8 +272,9 @@ export default function Marketplace() {
   // toggle live on the Account tab — no need to repeat them here.)
   const sheetHeader = (
     <View style={{ paddingHorizontal: 16, paddingBottom: 4 }}>
-      {/* clears the search bar above (bar: top+8, 48 tall) minus the grabber row */}
-      <View style={{ height: 45 }} />
+      {/* clears the status bar + the search bar above it (top+8, 48 tall), less
+          the grabber row the sheet already draws */}
+      <View style={{ height: insets.top + 45 }} />
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', rowGap: 8 }}>
         <ModeChip k="all" label={t('all')} />
         <ModeChip k="venta" label={t('buy')} />
@@ -333,7 +334,6 @@ export default function Marketplace() {
         <ListingsSheet
           ref={sheetRef}
           H={H}
-          topInset={insets.top}
           sheetY={sheetY}
           onSnapChange={onSnapChange}
           header={sheetHeader}

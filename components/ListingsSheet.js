@@ -23,8 +23,12 @@ const SPRING = { damping: 22, stiffness: 220, mass: 0.9 };
 const FLING = 500; // px/s — faster than this moves one snap in the fling direction
 
 // translateY for each snap, in the parent's coordinate space (H = parent height).
-export function sheetSnaps(H, topInset) {
-  return { full: topInset, half: Math.round(H * 0.55), collapsed: H - COLLAPSED_H };
+// `full` is 0 — the sheet covers the screen edge to edge, including the status bar
+// strip, so the search bar above it lands on the sheet's own paper instead of
+// leaving a sliver of map showing above it. The parent's header content leaves
+// room for the status bar and the bar itself.
+export function sheetSnaps(H) {
+  return { full: 0, half: Math.round(H * 0.55), collapsed: H - COLLAPSED_H };
 }
 
 function Pill({ label, onPress, dark }) {
@@ -36,12 +40,12 @@ function Pill({ label, onPress, dark }) {
 }
 
 const ListingsSheet = forwardRef(function ListingsSheet({
-  H, topInset, sheetY, onSnapChange, header,
+  H, sheetY, onSnapChange, header,
   status, count, globalCount, onZoomOut, onClearFilters, onRetry,
   data, listResetKey,
 }, ref) {
   const { t } = useI18n();
-  const snaps = sheetSnaps(H, topInset);
+  const snaps = sheetSnaps(H);
   const { full, half, collapsed } = snaps;
   const [snap, setSnap] = useState('collapsed');
   const snapRef = useRef('collapsed');
@@ -62,7 +66,7 @@ const ListingsSheet = forwardRef(function ListingsSheet({
   };
 
   // Keep the sheet on its current snap when the screen height becomes known/changes.
-  useEffect(() => { if (H > 0) sheetY.value = snaps[snapRef.current]; }, [H, topInset]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (H > 0) sheetY.value = snaps[snapRef.current]; }, [H]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useImperativeHandle(ref, () => ({
     snapTo(name) {
@@ -130,6 +134,11 @@ const ListingsSheet = forwardRef(function ListingsSheet({
     const p = interpolate(sheetY.value, [full, half], [1, 0], Extrapolation.CLAMP);
     return { height: hdrH.value * p, opacity: p };
   });
+  // Square off the top as it merges with the bar at full; rounded while it floats.
+  const radiusStyle = useAnimatedStyle(() => {
+    const r = interpolate(sheetY.value, [full, full + 80], [0, 20], Extrapolation.CLAMP);
+    return { borderTopLeftRadius: r, borderTopRightRadius: r };
+  });
   // At full the search bar sits right on top of the grabber, so fade it out there.
   const grabStyle = useAnimatedStyle(() => ({
     opacity: interpolate(sheetY.value, [full, full + 60], [0, 1], Extrapolation.CLAMP),
@@ -168,10 +177,10 @@ const ListingsSheet = forwardRef(function ListingsSheet({
   return (
     <Animated.View
       style={[{
-        position: 'absolute', left: 0, right: 0, top: 0, height: Math.max(0, H - topInset),
-        backgroundColor: colors.paper, borderTopLeftRadius: 20, borderTopRightRadius: 20,
+        position: 'absolute', left: 0, right: 0, top: 0, height: Math.max(0, H),
+        backgroundColor: colors.paper,
         shadowColor: '#000', shadowOffset: { width: 0, height: -3 }, shadowOpacity: 0.12, shadowRadius: 10, elevation: 12,
-      }, sheetStyle]}
+      }, sheetStyle, radiusStyle]}
     >
       <GestureDetector gesture={headerPan}>
         <View>
