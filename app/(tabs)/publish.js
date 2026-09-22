@@ -23,7 +23,10 @@ import { colors } from '../../lib/theme';
 import { useAuth, auth } from '../../lib/session';
 import { getApiBase } from '../../lib/config';
 
-const WIZARD_PATH = '/?sell=1&app=1';
+// The utm tag marks these visits as coming from OUR APP. Without it a listing
+// that starts in the app looks like an anonymous 'direct' visitor on the web,
+// and we cannot tell app-driven listings from strangers.
+const WIZARD_PATH = '/?sell=1&app=1&utm_source=mobile_app&utm_medium=app&utm_campaign=app_publish';
 
 export default function Publish() {
   const { user, refresh } = useAuth();
