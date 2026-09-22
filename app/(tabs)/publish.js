@@ -17,6 +17,7 @@ import { useCallback, useRef } from 'react';
 import { View, ActivityIndicator, Linking } from 'react-native';
 import { Image } from 'expo-image';
 import * as WebBrowser from 'expo-web-browser';
+import * as ExpoLinking from 'expo-linking';
 import { router, useFocusEffect } from 'expo-router';
 import { colors } from '../../lib/theme';
 import { useAuth, auth } from '../../lib/session';
@@ -32,11 +33,15 @@ export default function Publish() {
     if (runningRef.current) return;
     runningRef.current = true;
     const base = getApiBase();
-    let url = `${base}${WIZARD_PATH}`;
+    // Where the website should send us back to: casalibre://auth in a release
+    // build, exp://<host>/--/auth under Expo Go. Without this the web always
+    // replied to casalibre:// and Expo Go never heard back.
+    const path = `${WIZARD_PATH}&ret=${encodeURIComponent(ExpoLinking.createURL('auth'))}`;
+    let url = `${base}${path}`;
     try {
       // Signed in → carry the session into the browser so the wizard skips ahead.
       if (user) {
-        const { ok, data } = await auth.handoff(WIZARD_PATH);
+        const { ok, data } = await auth.handoff(path);
         if (ok && data?.url) url = data.url;
       }
       // A PLAIN browser, deliberately: openAuthSessionAsync makes iOS show the
@@ -48,7 +53,7 @@ export default function Publish() {
       if (refresh) await refresh();
       router.replace('/(tabs)');
     } catch {
-      try { await Linking.openURL(`${base}${WIZARD_PATH}`); } catch { /* nothing else to try */ }
+      try { await Linking.openURL(`${base}${path}`); } catch { /* nothing else to try */ }
       router.replace('/(tabs)');
     } finally {
       runningRef.current = false;

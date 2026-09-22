@@ -1,5 +1,11 @@
-// Modal auth — email-first flow over the buyer portal's web API (see lib/session).
-import { useState } from 'react';
+// Sign in — email + a 6-digit code, or Google. No passwords in the app: people
+// rarely sign out of an app, so a code they read once beats a password they have
+// to remember (and that we would have to store on a phone).
+//
+// One screen handles new and returning people alike: /api/auth/code/send decides
+// whether the code signs them in or creates the account, and /api/auth/code/verify
+// starts the session either way.
+import { useEffect, useRef, useState } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -22,7 +28,15 @@ const inputStyle = {
 // every TextInput on each keystroke ("keyboard closes after one word" bug).
 function Heading({ children }) {
   return (
-    <Text style={{ fontFamily: fonts.sansBold, fontSize: 22, color: colors.ink, marginTop: 20, marginBottom: 16, alignSelf: 'stretch' }}>
+    <Text style={{ fontFamily: fonts.sansBold, fontSize: 22, color: colors.ink, marginTop: 20, marginBottom: 8, alignSelf: 'stretch' }}>
+      {children}
+    </Text>
+  );
+}
+
+function Sub({ children }) {
+  return (
+    <Text style={{ fontFamily: fonts.sans, fontSize: 14.5, color: colors.ink60, marginBottom: 16, alignSelf: 'stretch', lineHeight: 21 }}>
       {children}
     </Text>
   );
@@ -38,25 +52,62 @@ function ErrorText({ error }) {
 export default function Auth() {
   const { t, lang } = useI18n();
   const { refresh } = useAuth();
+  const es = lang !== 'en';
 
-  const [step, setStep] = useState('email'); // email | login | signup | otp
+  const [step, setStep] = useState('email');   // email | code
+  const [mode, setMode] = useState('login');   // what the code will do: login | signup
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
-  const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resentAt, setResentAt] = useState(0);
+  const codeRef = useRef(null);
+
+  useEffect(() => { if (step === 'code') setTimeout(() => codeRef.current?.focus(), 350); }, [step]);
 
   const close = () => router.back();
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
-  const onContinue = async () => {
-    if (!email.trim()) return;
+  // Step 1 — ask for the code.
+  const sendCode = async (resend = false) => {
+    if (!emailOk) { setError(es ? 'Ingresá un correo válido' : 'Enter a valid email'); return; }
     setError(''); setLoading(true);
-    const { ok, data } = await auth.checkEmail(email.trim());
+    const { ok, data, status } = await auth.sendCode(email.trim(), fullName.trim() || undefined);
     setLoading(false);
-    if (!ok) { setError(lang === 'en' ? 'Something went wrong' : 'Algo salió mal'); return; }
-    setStep(data.exists ? 'login' : 'signup');
+    if (!ok) {
+      if (status === 429 || data?.error === 'rate_limited' || data?.error === 'cooldown') {
+        setError(es ? 'Esperá un momento antes de pedir otro código.' : 'Wait a moment before asking for another code.');
+      } else if (data?.error === 'email_send_failed') {
+        setError(es ? 'No pudimos enviar el correo. Probá de nuevo.' : "We couldn't send the email. Try again.");
+      } else {
+        setError(es ? 'No se pudo enviar el código' : 'Could not send the code');
+      }
+      return;
+    }
+    setMode(data?.mode === 'signup' ? 'signup' : 'login');
+    setStep('code');
+    if (resend) setResentAt(Date.now());
+  };
+
+  // Step 2 — confirm it and start the session.
+  const verifyCode = async () => {
+    const c = code.replace(/\D/g, '');
+    if (c.length < 6) { setError(es ? 'Ingresá el código de 6 dígitos' : 'Enter the 6-digit code'); return; }
+    setError(''); setLoading(true);
+    const { ok, data } = await auth.verifyCode({ email: email.trim(), code: c, fullName: fullName.trim() || undefined });
+    setLoading(false);
+    if (!ok) {
+      const left = data?.attemptsLeft;
+      setError(
+        data?.error === 'expired' ? (es ? 'El código venció. Pedí uno nuevo.' : 'That code expired. Ask for a new one.')
+          : es ? `Código incorrecto${typeof left === 'number' ? ` · te quedan ${left} intentos` : ''}`
+               : `Wrong code${typeof left === 'number' ? ` · ${left} tries left` : ''}`
+      );
+      return;
+    }
+    await refresh();
+    router.back();
   };
 
   const onGoogle = async () => {
@@ -67,177 +118,124 @@ export default function Auth() {
       // us that URL, carrying the one-time session token to exchange for the cookie.
       const redirectUrl = Linking.createURL('auth');
       const { ok, data } = await auth.googleUrl(redirectUrl);
-      if (!ok || !data?.url) { setError(lang === 'en' ? 'Google sign-in unavailable' : 'Google no disponible'); return; }
+      if (!ok || !data?.url) { setError(es ? 'Google no disponible' : 'Google sign-in unavailable'); return; }
       const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
       if (result.type !== 'success' || !result.url) return; // user cancelled / dismissed
       const token = Linking.parse(result.url).queryParams?.token;
-      if (!token) { setError(lang === 'en' ? 'Google sign-in failed' : 'No se pudo iniciar con Google'); return; }
+      if (!token) { setError(es ? 'No se pudo iniciar con Google' : 'Google sign-in failed'); return; }
       const ex = await auth.mobileExchange(String(token));
       if (ex.ok) { await refresh(); router.back(); return; }
-      setError(lang === 'en' ? 'Google sign-in failed' : 'No se pudo iniciar con Google');
+      setError(es ? 'No se pudo iniciar con Google' : 'Google sign-in failed');
     } catch {
-      setError(lang === 'en' ? 'Google sign-in failed' : 'No se pudo iniciar con Google');
+      setError(es ? 'No se pudo iniciar con Google' : 'Google sign-in failed');
     }
-  };
-
-  const onLogin = async () => {
-    setError(''); setLoading(true);
-    const { ok, status } = await auth.login(email.trim(), password);
-    setLoading(false);
-    if (ok) { await refresh(); router.back(); return; }
-    if (status === 401 || status === 400) setError('Correo o contraseña incorrectos');
-    else setError(lang === 'en' ? 'Something went wrong' : 'Algo salió mal');
-  };
-
-  const onSignup = async () => {
-    if (password.length < 6) { setError(lang === 'en' ? 'Password must be at least 6 characters' : 'La contraseña debe tener al menos 6 caracteres'); return; }
-    setError(''); setLoading(true);
-    const { ok, status } = await auth.sendOtp(email.trim(), fullName, phone);
-    setLoading(false);
-    if (ok) { setStep('otp'); return; }
-    if (status === 409) setError('Ese correo ya está registrado');
-    else if (status === 429) setError('Esperá un momento e intentá de nuevo');
-    else setError(lang === 'en' ? 'Something went wrong' : 'Algo salió mal');
-  };
-
-  const onResend = async () => {
-    setError('');
-    await auth.sendOtp(email.trim(), fullName, phone);
-  };
-
-  const onVerify = async () => {
-    setError(''); setLoading(true);
-    const { ok } = await auth.verifyOtp({ email: email.trim(), code, password, fullName, phone });
-    setLoading(false);
-    if (ok) { await refresh(); router.back(); return; }
-    setError('Código inválido');
   };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.paper }} edges={['top']}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        {/* Close */}
-        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 16, paddingTop: 8 }}>
-          <Pressable onPress={close} hitSlop={12} style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8 }}>
+          <Wordmark size={20} />
+          <Pressable onPress={close} hitSlop={12} style={{ padding: 6 }}>
             <Ionicons name="close" size={26} color={colors.ink} />
           </Pressable>
         </View>
 
-        <ScrollView
-          contentContainerStyle={{ flexGrow: 1, alignItems: 'center', paddingHorizontal: 20, paddingBottom: 60 }}
-          keyboardShouldPersistTaps="handled"
-          automaticallyAdjustKeyboardInsets
-        >
-        <View style={{ width: '100%', maxWidth: 420, alignItems: 'center' }}>
-          <Wordmark size={30} />
-
+        <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40, alignItems: 'flex-start' }} keyboardShouldPersistTaps="handled">
           {step === 'email' && (
             <>
               <Heading>{t('signIn')}</Heading>
+              <Sub>
+                {es
+                  ? 'Te enviamos un código de 6 dígitos por correo. Sin contraseñas.'
+                  : 'We email you a 6-digit code. No passwords.'}
+              </Sub>
               <TextInput
                 value={email}
-                onChangeText={setEmail}
-                placeholder={t('email')}
+                onChangeText={(v) => { setEmail(v); setError(''); }}
+                placeholder={es ? 'tu@correo.com' : 'you@email.com'}
                 placeholderTextColor={colors.ink45}
                 autoCapitalize="none"
                 autoCorrect={false}
                 keyboardType="email-address"
+                textContentType="emailAddress"
+                autoComplete="email"
+                returnKeyType="send"
+                onSubmitEditing={() => sendCode()}
                 style={inputStyle}
               />
               <ErrorText error={error} />
-              <Button label={t('continue')} onPress={onContinue} loading={loading} style={{ alignSelf: 'stretch', marginTop: 16 }} />
-              <Button
-                label={t('signInGoogle')}
-                variant="outline"
+              <Button label={es ? 'Enviarme el código' : 'Email me the code'} onPress={() => sendCode()} loading={loading} style={{ alignSelf: 'stretch', marginTop: 16 }} />
+
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, alignSelf: 'stretch', marginVertical: 18 }}>
+                <View style={{ flex: 1, height: 1, backgroundColor: colors.ink12 }} />
+                <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.ink45 }}>{es ? 'o' : 'or'}</Text>
+                <View style={{ flex: 1, height: 1, backgroundColor: colors.ink12 }} />
+              </View>
+
+              <Pressable
                 onPress={onGoogle}
-                icon={<Ionicons name="logo-google" size={18} color={colors.ink} />}
-                style={{ alignSelf: 'stretch', marginTop: 12, backgroundColor: colors.card }}
-              />
-            </>
-          )}
-
-          {step === 'login' && (
-            <>
-              <Heading>{t('signIn')}</Heading>
-              <Text style={{ fontFamily: fonts.mono, fontSize: 13, color: colors.ink60, alignSelf: 'stretch', marginBottom: 12 }}>{email}</Text>
-              <TextInput
-                value={password}
-                onChangeText={setPassword}
-                placeholder={t('password')}
-                placeholderTextColor={colors.ink45}
-                secureTextEntry
-                autoCapitalize="none"
-                style={inputStyle}
-              />
-              <ErrorText error={error} />
-              <Button label={t('signIn')} onPress={onLogin} loading={loading} style={{ alignSelf: 'stretch', marginTop: 16 }} />
-              <Pressable onPress={() => { setStep('email'); setError(''); setPassword(''); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 16 }}>
-                <Ionicons name="arrow-back" size={16} color={colors.ink60} />
-                <Text style={{ fontFamily: fonts.sans, fontSize: 14, color: colors.ink60 }}>{t('useAnotherEmail')}</Text>
+                style={({ pressed }) => [{
+                  alignSelf: 'stretch', height: 50, borderRadius: radii.pill, borderWidth: 1.5, borderColor: colors.ink,
+                  backgroundColor: colors.card, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
+                }, pressed && { transform: [{ translateY: 1 }] }]}
+              >
+                <Ionicons name="logo-google" size={18} color={colors.ink} />
+                <Text style={{ fontFamily: fonts.sansMed, fontSize: 15.5, color: colors.ink }}>
+                  {es ? 'Continuar con Google' : 'Continue with Google'}
+                </Text>
               </Pressable>
             </>
           )}
 
-          {step === 'signup' && (
+          {step === 'code' && (
             <>
-              <Heading>{t('createAccount')}</Heading>
-              <Text style={{ fontFamily: fonts.mono, fontSize: 13, color: colors.ink60, alignSelf: 'stretch', marginBottom: 12 }}>{email}</Text>
-              <TextInput
-                value={fullName}
-                onChangeText={setFullName}
-                placeholder={lang === 'en' ? 'Full name' : 'Nombre completo'}
-                placeholderTextColor={colors.ink45}
-                style={[inputStyle, { marginBottom: 12 }]}
-              />
-              <TextInput
-                value={phone}
-                onChangeText={setPhone}
-                placeholder={lang === 'en' ? 'Phone' : 'Teléfono'}
-                placeholderTextColor={colors.ink45}
-                keyboardType="phone-pad"
-                style={[inputStyle, { marginBottom: 12 }]}
-              />
-              <TextInput
-                value={password}
-                onChangeText={setPassword}
-                placeholder={t('password')}
-                placeholderTextColor={colors.ink45}
-                secureTextEntry
-                autoCapitalize="none"
-                style={inputStyle}
-              />
-              <ErrorText error={error} />
-              <Button label={t('createAccount')} onPress={onSignup} loading={loading} style={{ alignSelf: 'stretch', marginTop: 16 }} />
-              <Pressable onPress={() => { setStep('email'); setError(''); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 16 }}>
-                <Ionicons name="arrow-back" size={16} color={colors.ink60} />
-                <Text style={{ fontFamily: fonts.sans, fontSize: 14, color: colors.ink60 }}>{t('useAnotherEmail')}</Text>
-              </Pressable>
-            </>
-          )}
+              <Heading>{es ? 'Revisá tu correo' : 'Check your email'}</Heading>
+              <Sub>
+                {es
+                  ? `Enviamos un código de 6 dígitos a ${email.trim()}.`
+                  : `We sent a 6-digit code to ${email.trim()}.`}
+              </Sub>
 
-          {step === 'otp' && (
-            <>
-              <Heading>{lang === 'en' ? 'Verify your email' : 'Verificá tu correo'}</Heading>
-              <Text style={{ fontFamily: fonts.sans, fontSize: 14, color: colors.ink60, alignSelf: 'stretch', marginBottom: 12 }}>
-                {lang === 'en' ? 'Enter the 6-digit code we sent to' : 'Ingresá el código de 6 dígitos que enviamos a'} {email}
-              </Text>
+              {mode === 'signup' ? (
+                <TextInput
+                  value={fullName}
+                  onChangeText={setFullName}
+                  placeholder={es ? 'Tu nombre' : 'Your name'}
+                  placeholderTextColor={colors.ink45}
+                  autoCapitalize="words"
+                  textContentType="name"
+                  style={[inputStyle, { marginBottom: 12 }]}
+                />
+              ) : null}
+
               <TextInput
+                ref={codeRef}
                 value={code}
-                onChangeText={setCode}
-                placeholder="••••••"
+                onChangeText={(v) => { setCode(v.replace(/\D/g, '').slice(0, 6)); setError(''); }}
+                placeholder="123456"
                 placeholderTextColor={colors.ink45}
-                keyboardType="numeric"
+                keyboardType="number-pad"
+                textContentType="oneTimeCode"
+                autoComplete="one-time-code"
                 maxLength={6}
-                style={[inputStyle, { fontFamily: fonts.mono, fontSize: 22, letterSpacing: 8, textAlign: 'center' }]}
+                style={[inputStyle, { fontFamily: fonts.mono, fontSize: 22, letterSpacing: 6, textAlign: 'center' }]}
               />
               <ErrorText error={error} />
-              <Button label={t('verify')} onPress={onVerify} loading={loading} style={{ alignSelf: 'stretch', marginTop: 16 }} />
-              <Pressable onPress={onResend} style={{ marginTop: 16 }}>
-                <Text style={{ fontFamily: fonts.sans, fontSize: 14, color: colors.ink60 }}>{t('resendCode')}</Text>
+              <Button label={t('verify') || (es ? 'Verificar' : 'Verify')} onPress={verifyCode} loading={loading} style={{ alignSelf: 'stretch', marginTop: 16 }} />
+
+              <Pressable onPress={() => sendCode(true)} style={{ alignSelf: 'center', marginTop: 16 }}>
+                <Text style={{ fontFamily: fonts.sansMed, fontSize: 14, color: colors.ink60 }}>
+                  {resentAt ? (es ? 'Código reenviado' : 'Code resent') : (es ? 'Reenviar código' : 'Resend code')}
+                </Text>
+              </Pressable>
+              <Pressable onPress={() => { setStep('email'); setCode(''); setError(''); }} style={{ alignSelf: 'center', marginTop: 12 }}>
+                <Text style={{ fontFamily: fonts.sansMed, fontSize: 14, color: colors.ink }}>
+                  {es ? 'Usar otro correo' : 'Use a different email'}
+                </Text>
               </Pressable>
             </>
           )}
-        </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

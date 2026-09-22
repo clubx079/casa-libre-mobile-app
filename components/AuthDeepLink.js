@@ -22,11 +22,12 @@ export default function AuthDeepLink() {
     const handle = async (url) => {
       if (!url || !alive || handledRef.current === url) return;
       const parsed = Linking.parse(url);
-      // only our own auth return, nothing else the app might be opened with
-      if (!/(^|\/)auth\/?$/.test(`/${parsed.path || ''}`)) return;
+      const { token, listing, error } = parsed.queryParams || {};
+      // Match on the payload rather than the path: casalibre://auth parses with
+      // hostname 'auth' and no path, while Expo Go's exp://<host>/--/auth parses
+      // with path 'auth'. Only our own auth return carries a token/error.
+      if (!token && !error) return;
       handledRef.current = url;
-
-      const { token, listing } = parsed.queryParams || {};
       try { await WebBrowser.dismissBrowser(); } catch { /* already closed */ }
       if (token) {
         try { await auth.mobileExchange(String(token)); } catch { /* keep going: refresh will tell us */ }
