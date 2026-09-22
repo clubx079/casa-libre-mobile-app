@@ -45,34 +45,42 @@ function useImages(l, active) {
   return imgs && imgs.length ? imgs : (l.image ? [l.image] : []);
 }
 
-function Photos({ l, width, active }) {
+// Photo pager. It measures its OWN width (onLayout) instead of taking the card's:
+// the card has a 1–1.5px border, so paging by the card width drifts a couple of
+// pixels per swipe and eventually shows two photos at once over the text.
+function Photos({ l, active }) {
   const images = useImages(l, active);
+  const [w, setW] = useState(0);
   const [i, setI] = useState(0);
   useEffect(() => { setI(0); }, [l.id]);
-  if (!images.length) return <Hatch style={{ width: '100%', height: '100%' }} />;
-  const dots = Math.min(images.length, MAX_DOTS);
   return (
-    <View style={{ width, height: IMG_H }}>
-      <FlatList
-        data={images}
-        horizontal
-        pagingEnabled
-        nestedScrollEnabled
-        showsHorizontalScrollIndicator={false}
-        keyExtractor={(u, k) => `${l.id}-${k}`}
-        scrollEventThrottle={16}
-        onScroll={(e) => {
-          const n = Math.round(e.nativeEvent.contentOffset.x / width);
-          if (n !== i) setI(n);
-        }}
-        renderItem={({ item }) => (
-          <Image source={{ uri: item }} style={{ width, height: IMG_H }} contentFit="cover" transition={120} />
-        )}
-      />
-      {images.length > 1 ? (
+    <View style={{ flex: 1, overflow: 'hidden' }} onLayout={(e) => setW(Math.round(e.nativeEvent.layout.width))}>
+      {!images.length || !w ? (
+        <Hatch style={{ width: '100%', height: '100%' }} />
+      ) : (
+        <FlatList
+          data={images}
+          horizontal
+          pagingEnabled
+          nestedScrollEnabled
+          showsHorizontalScrollIndicator={false}
+          style={{ width: w, height: IMG_H }}
+          keyExtractor={(u, k) => `${l.id}-${k}`}
+          getItemLayout={(_, index) => ({ length: w, offset: w * index, index })}
+          scrollEventThrottle={16}
+          onScroll={(e) => {
+            const n = Math.max(0, Math.min(images.length - 1, Math.round(e.nativeEvent.contentOffset.x / w)));
+            if (n !== i) setI(n);
+          }}
+          renderItem={({ item }) => (
+            <Image source={{ uri: item }} style={{ width: w, height: IMG_H }} contentFit="cover" transition={120} />
+          )}
+        />
+      )}
+      {images.length > 1 && w ? (
         <View style={{ position: 'absolute', bottom: 8, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(17,17,17,0.45)', paddingHorizontal: 8, paddingVertical: 5, borderRadius: radii.pill }}>
           {images.length <= MAX_DOTS
-            ? Array.from({ length: dots }).map((_, k) => (
+            ? images.map((_, k) => (
               <View key={k} style={{ width: k === i ? 7 : 5, height: k === i ? 7 : 5, borderRadius: 4, backgroundColor: k === i ? '#fff' : 'rgba(255,255,255,0.55)' }} />
             ))
             : <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: '#fff' }}>{i + 1}/{images.length}</Text>}
@@ -90,8 +98,8 @@ const PreviewCard = memo(function PreviewCard({ l, width, active, onPress }) {
   return (
     <View style={{ width, height: PREVIEW_H }}>
       <View style={{ flex: 1, backgroundColor: colors.card, borderRadius: radii.card, borderWidth: promoted ? 1.5 : 1, borderColor: promoted ? colors.ink : colors.ink12, overflow: 'hidden', ...softShadow, shadowOpacity: 0.18 }}>
-        <View style={{ height: IMG_H, backgroundColor: colors.hatch }}>
-          <Photos l={l} width={width} active={active} />
+        <View style={{ height: IMG_H, backgroundColor: colors.hatch, overflow: 'hidden' }}>
+          <Photos l={l} active={active} />
           <View style={{ position: 'absolute', top: 6, right: 6 }}>
             <SaveButton id={l.id} variant="card" />
           </View>
