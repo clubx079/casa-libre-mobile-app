@@ -1,0 +1,242 @@
+// The map-first search screen's listings sheet: a draggable bottom sheet with three
+// snap points (collapsed → half → full) that holds the in-view listings.
+//
+//  • collapsed: grabber + count line only, just above the tab bar
+//  • half:      ~45% of the screen — count + the first card(s)
+//  • full:      the whole list; the parent's `header` rows (wordmark, search,
+//               Comprar/Alquilar chips) grow in above the count as it rises
+//
+// The parent owns `sheetY` (a reanimated shared value = the sheet's translateY in
+// screen px) so it can fade/move its own map overlays with the sheet.
+// The list only scrolls at full; pulling down while it's at the top drags the sheet.
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { View, Text, Pressable, ActivityIndicator, Modal, FlatList } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle, useAnimatedScrollHandler, withSpring, interpolate, Extrapolation, runOnJS } from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
+import { colors, fonts, radii } from '../lib/theme';
+import { useI18n } from '../lib/i18n';
+import PropertyCard from './PropertyCard';
+
+export const COLLAPSED_H = 76;
+const PER_PAGE = 24;
+const SPRING = { damping: 22, stiffness: 220, mass: 0.9 };
+const FLING = 500; // px/s — faster than this moves one snap in the fling direction
+
+// translateY for each snap, in the parent's coordinate space (H = parent height).
+export function sheetSnaps(H, topInset) {
+  return { full: topInset, half: Math.round(H * 0.55), collapsed: H - COLLAPSED_H };
+}
+
+function Pill({ label, onPress, dark }) {
+  return (
+    <Pressable onPress={onPress} hitSlop={6} style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: radii.pill, borderWidth: 1.5, borderColor: colors.ink, backgroundColor: dark ? colors.ink : colors.card }}>
+      <Text style={{ fontFamily: fonts.sansMed, fontSize: 13, color: dark ? colors.paper : colors.ink }}>{label}</Text>
+    </Pressable>
+  );
+}
+
+const ListingsSheet = forwardRef(function ListingsSheet({
+  H, topInset, sheetY, onSnapChange, header,
+  status, count, globalCount, onZoomOut, onClearFilters, onRetry,
+  data, noCoords = [], listResetKey,
+}, ref) {
+  const { t } = useI18n();
+  const snaps = sheetSnaps(H, topInset);
+  const { full, half, collapsed } = snaps;
+  const [snap, setSnap] = useState('collapsed');
+  const snapRef = useRef('collapsed');
+  const [page, setPage] = useState(1);
+  const [noCoordsOpen, setNoCoordsOpen] = useState(false);
+  const listRef = useRef(null);
+
+  const scrollY = useSharedValue(0);
+  const startY = useSharedValue(0);
+  const anchor = useSharedValue(0);
+  const moved = useSharedValue(false);
+  const hdrH = useSharedValue(0);
+
+  const commitSnap = (name) => {
+    if (snapRef.current === name) return;
+    snapRef.current = name;
+    setSnap(name);
+    if (onSnapChange) onSnapChange(name);
+  };
+
+  // Keep the sheet on its current snap when the screen height becomes known/changes.
+  useEffect(() => { if (H > 0) sheetY.value = snaps[snapRef.current]; }, [H, topInset]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useImperativeHandle(ref, () => ({
+    snapTo(name) {
+      if (!(name in snaps)) return;
+      sheetY.value = withSpring(snaps[name], SPRING);
+      commitSnap(name);
+    },
+    getSnap: () => snapRef.current,
+  }));
+
+  // New area / filters → back to the top of the list, first page.
+  useEffect(() => {
+    setPage(1);
+    if (listRef.current) listRef.current.scrollToOffset({ offset: 0, animated: false });
+  }, [listResetKey]);
+
+  // Release: a fling moves one snap in its direction, otherwise snap to the nearest.
+  const settle = (vy) => {
+    'worklet';
+    const y = sheetY.value;
+    const pts = [full, half, collapsed];
+    let target = pts[0], best = Infinity;
+    if (vy < -FLING) {
+      target = full;
+      for (let i = pts.length - 1; i >= 0; i--) if (pts[i] < y - 1) { target = pts[i]; break; }
+    } else if (vy > FLING) {
+      target = collapsed;
+      for (let i = 0; i < pts.length; i++) if (pts[i] > y + 1) { target = pts[i]; break; }
+    } else {
+      for (let i = 0; i < pts.length; i++) { const d = Math.abs(pts[i] - y); if (d < best) { best = d; target = pts[i]; } }
+    }
+    sheetY.value = withSpring(target, { ...SPRING, velocity: vy });
+    runOnJS(commitSnap)(target === full ? 'full' : target === half ? 'half' : 'collapsed');
+  };
+  const clampY = (v) => { 'worklet'; return Math.min(collapsed, Math.max(full, v)); };
+
+  // Grabber + header + count line: always drags the sheet.
+  const headerPan = Gesture.Pan()
+    .activeOffsetY([-6, 6])
+    .onStart(() => { startY.value = sheetY.value; })
+    .onUpdate((e) => { sheetY.value = clampY(startY.value + e.translationY); })
+    .onEnd((e) => { settle(e.velocityY); });
+
+  // List body: drags the sheet unless it's full and the list is scrolled down.
+  const native = Gesture.Native();
+  const bodyPan = Gesture.Pan()
+    .activeOffsetY([-8, 8])
+    .failOffsetX([-20, 20])
+    .simultaneousWithExternalGesture(native)
+    .onStart(() => { startY.value = sheetY.value; anchor.value = 0; moved.value = false; })
+    .onUpdate((e) => {
+      if (startY.value > full + 1) { sheetY.value = clampY(startY.value + e.translationY); moved.value = true; return; }
+      // Full: the list owns the gesture until it's at the very top and the finger pulls down.
+      if (scrollY.value > 0.5) { anchor.value = e.translationY; return; }
+      const d = e.translationY - anchor.value;
+      if (d > 0) { sheetY.value = clampY(full + d); moved.value = true; } else sheetY.value = full;
+    })
+    .onEnd((e) => { if (moved.value) settle(e.velocityY); });
+
+  const onScroll = useAnimatedScrollHandler((e) => { scrollY.value = e.contentOffset.y; });
+
+  const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: sheetY.value }] }));
+  // The full-state header rows grow in between the half and full snaps.
+  const hdrStyle = useAnimatedStyle(() => {
+    const p = interpolate(sheetY.value, [half, full], [0, 1], Extrapolation.CLAMP);
+    return { height: hdrH.value * p, opacity: p };
+  });
+
+  const visible = (data || []).slice(0, page * PER_PAGE);
+  const isFull = snap === 'full';
+
+  let countLine;
+  if (status === 'boot' || status === 'moving') {
+    countLine = (
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <ActivityIndicator size="small" color={colors.ink} />
+        <Text style={{ fontFamily: fonts.sansMed, fontSize: 15, color: colors.ink70 }}>{status === 'boot' ? t('loadingProps') : t('searchingArea')}</Text>
+      </View>
+    );
+  } else if (status === 'error') {
+    countLine = (
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <Text style={{ fontFamily: fonts.sansMed, fontSize: 14, color: colors.ink }}>{t('loadError')}</Text>
+        <Pill label={t('retry')} onPress={onRetry} dark />
+      </View>
+    );
+  } else {
+    countLine = (
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <Text style={{ fontFamily: fonts.sansBold, fontSize: 16, color: colors.ink }}>
+          {count.toLocaleString('es-PY')} {count === 1 ? t('propInArea') : t('propsInArea')}
+        </Text>
+        {count === 0 && globalCount === 0 ? <Pill label={t('clearFilters')} onPress={onClearFilters} /> : null}
+        {count === 0 && globalCount > 0 ? <Pill label={t('zoomOut')} onPress={onZoomOut} /> : null}
+      </View>
+    );
+  }
+
+  const footer = noCoords.length && status !== 'boot' ? (
+    <Pressable onPress={() => setNoCoordsOpen(true)} style={{ paddingVertical: 16, alignItems: 'center', borderTopWidth: 1, borderTopColor: colors.ink08 }}>
+      <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.ink60 }}>
+        + {noCoords.length} {t('noCoordsRow')} · <Text style={{ color: colors.ink, textDecorationLine: 'underline' }}>{t('see')}</Text>
+      </Text>
+    </Pressable>
+  ) : null;
+
+  return (
+    <Animated.View
+      style={[{
+        position: 'absolute', left: 0, right: 0, top: 0, height: Math.max(0, H - topInset),
+        backgroundColor: colors.paper, borderTopLeftRadius: 20, borderTopRightRadius: 20,
+        shadowColor: '#000', shadowOffset: { width: 0, height: -3 }, shadowOpacity: 0.12, shadowRadius: 10, elevation: 12,
+      }, sheetStyle]}
+    >
+      <GestureDetector gesture={headerPan}>
+        <View>
+          <View style={{ alignItems: 'center', paddingTop: 8, paddingBottom: 6 }}>
+            <View style={{ width: 40, height: 5, borderRadius: 3, backgroundColor: colors.ink30 }} />
+          </View>
+          <Animated.View style={[{ overflow: 'hidden' }, hdrStyle]} pointerEvents={isFull ? 'auto' : 'none'}>
+            <View style={{ position: 'absolute', left: 0, right: 0, top: 0 }} onLayout={(e) => { hdrH.value = e.nativeEvent.layout.height; }}>
+              {header}
+            </View>
+          </Animated.View>
+          <View style={{ minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16, paddingBottom: 8 }}>
+            {countLine}
+          </View>
+        </View>
+      </GestureDetector>
+
+      <GestureDetector gesture={bodyPan}>
+        <View style={{ flex: 1 }}>
+          <GestureDetector gesture={native}>
+            <Animated.FlatList
+              ref={listRef}
+              data={status === 'boot' ? [] : visible}
+              keyExtractor={(l) => l.id}
+              renderItem={({ item }) => <PropertyCard listing={item} />}
+              contentContainerStyle={{ padding: 16, paddingTop: 4, paddingBottom: 48 }}
+              style={{ opacity: status === 'moving' ? 0.4 : 1 }}
+              scrollEnabled={isFull}
+              bounces={false}
+              overScrollMode="never"
+              keyboardShouldPersistTaps="handled"
+              onScroll={onScroll}
+              scrollEventThrottle={16}
+              onEndReachedThreshold={0.5}
+              onEndReached={() => { if (visible.length < (data || []).length) setPage((p) => p + 1); }}
+              ListFooterComponent={footer}
+            />
+          </GestureDetector>
+        </View>
+      </GestureDetector>
+
+      {/* Listings without coordinates — can't be on the map, so they live here. */}
+      <Modal visible={noCoordsOpen} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setNoCoordsOpen(false)}>
+        <View style={{ flex: 1, backgroundColor: colors.paper }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, paddingBottom: 8 }}>
+            <Text style={{ fontFamily: fonts.sansBold, fontSize: 20, color: colors.ink }}>{t('noCoordsTitle')} · {noCoords.length}</Text>
+            <Pressable onPress={() => setNoCoordsOpen(false)} hitSlop={10}><Ionicons name="close" size={24} color={colors.ink} /></Pressable>
+          </View>
+          <FlatList
+            data={noCoords}
+            keyExtractor={(l) => l.id}
+            contentContainerStyle={{ padding: 16 }}
+            renderItem={({ item }) => <PropertyCard listing={item} onPress={() => { setNoCoordsOpen(false); router.push(`/property/${item.id}`); }} />}
+          />
+        </View>
+      </Modal>
+    </Animated.View>
+  );
+});
+
+export default ListingsSheet;
