@@ -6,7 +6,8 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "test": "node --no-warnings --test \"lib/__tests__/*.test.mjs\""
   },
   "dependencies": {
     "@expo-google-fonts/ibm-plex-mono": "^0.4.1",
