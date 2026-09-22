@@ -1,6 +1,4 @@
-// Sign in — email + a 6-digit code, or Google. No passwords in the app: people
-// rarely sign out of an app, so a code they read once beats a password they have
-// to remember (and that we would have to store on a phone).
+// Sign in — email + a 6-digit code, or Google.
 //
 // One screen handles new and returning people alike: /api/auth/code/send decides
 // whether the code signs them in or creates the account, and /api/auth/code/verify
@@ -145,11 +143,6 @@ export default function Auth() {
           {step === 'email' && (
             <>
               <Heading>{t('signIn')}</Heading>
-              <Sub>
-                {es
-                  ? 'Te enviamos un código de 6 dígitos por correo. Sin contraseñas.'
-                  : 'We email you a 6-digit code. No passwords.'}
-              </Sub>
               <TextInput
                 value={email}
                 onChangeText={(v) => { setEmail(v); setError(''); }}
