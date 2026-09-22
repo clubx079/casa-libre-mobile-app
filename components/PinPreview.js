@@ -6,8 +6,9 @@
 // The parent highlights the pin of whichever card is showing, so the index is
 // reported while the finger is still moving (onScroll, at the half-way point) —
 // waiting for onMomentumScrollEnd made the pin visibly lag behind the card.
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, FlatList, useWindowDimensions } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { FadeInDown, FadeOutDown } from 'react-native-reanimated';
 import { Image } from 'expo-image';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
@@ -48,16 +49,22 @@ function useImages(l, active) {
 // Photo pager. It measures its OWN width (onLayout) instead of taking the card's:
 // the card has a 1–1.5px border, so paging by the card width drifts a couple of
 // pixels per swipe and eventually shows two photos at once over the text.
-function Photos({ l, active }) {
+//
+// `outerGesture` is the card carousel's scroll gesture: the photo strip BLOCKS it,
+// so a horizontal swipe on the photo pages the photos instead of sliding the card
+// to the next property (a swipe lower down, on the info, still changes property).
+function Photos({ l, active, outerGesture }) {
   const images = useImages(l, active);
   const [w, setW] = useState(0);
   const [i, setI] = useState(0);
   useEffect(() => { setI(0); }, [l.id]);
+  const inner = useMemo(() => Gesture.Native().blocksExternalGesture(outerGesture), [outerGesture]);
   return (
     <View style={{ flex: 1, overflow: 'hidden' }} onLayout={(e) => setW(Math.round(e.nativeEvent.layout.width))}>
       {!images.length || !w ? (
         <Hatch style={{ width: '100%', height: '100%' }} />
       ) : (
+        <GestureDetector gesture={inner}>
         <FlatList
           data={images}
           horizontal
@@ -76,6 +83,7 @@ function Photos({ l, active }) {
             <Image source={{ uri: item }} style={{ width: w, height: IMG_H }} contentFit="cover" transition={120} />
           )}
         />
+        </GestureDetector>
       )}
       {images.length > 1 && w ? (
         <View style={{ position: 'absolute', bottom: 8, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(17,17,17,0.45)', paddingHorizontal: 8, paddingVertical: 5, borderRadius: radii.pill }}>
@@ -90,7 +98,7 @@ function Photos({ l, active }) {
   );
 }
 
-const PreviewCard = memo(function PreviewCard({ l, width, active, onPress }) {
+const PreviewCard = memo(function PreviewCard({ l, width, active, onPress, outerGesture }) {
   const { lang } = useI18n();
   const per = l.mode === 'alquiler' ? (lang === 'en' ? '/mo' : '/mes') : '';
   const promoted = !!(l.verified || l.plan);
@@ -99,7 +107,10 @@ const PreviewCard = memo(function PreviewCard({ l, width, active, onPress }) {
     <View style={{ width, height: PREVIEW_H }}>
       <View style={{ flex: 1, backgroundColor: colors.card, borderRadius: radii.card, borderWidth: promoted ? 1.5 : 1, borderColor: promoted ? colors.ink : colors.ink12, overflow: 'hidden', ...softShadow, shadowOpacity: 0.18 }}>
         <View style={{ height: IMG_H, backgroundColor: colors.hatch, overflow: 'hidden' }}>
-          <Photos l={l} active={active} />
+          {/* Tapping the photo opens the property; dragging it pages the photos. */}
+          <Pressable onPress={onPress} style={{ flex: 1 }}>
+            <Photos l={l} active={active} outerGesture={outerGesture} />
+          </Pressable>
           <View style={{ position: 'absolute', top: 6, right: 6 }}>
             <SaveButton id={l.id} variant="card" />
           </View>
@@ -139,6 +150,7 @@ function SeeAllCard({ width, more, onPress }) {
 
 export default function PinPreview({ items, more = 0, bottom, onIndexChange, onOpen, onSeeAll }) {
   const { width: W } = useWindowDimensions();
+  const outerGesture = useMemo(() => Gesture.Native(), []);
   const cardW = Math.round(W * 0.9);
   const side = Math.round((W - cardW) / 2);
   const interval = cardW + GAP;
@@ -164,6 +176,7 @@ export default function PinPreview({ items, more = 0, bottom, onIndexChange, onO
       style={{ position: 'absolute', left: 0, right: 0, bottom, height: PREVIEW_H }}
       pointerEvents="box-none"
     >
+      <GestureDetector gesture={outerGesture}>
       <FlatList
         key={items[0]?.id}
         data={data}
@@ -180,8 +193,9 @@ export default function PinPreview({ items, more = 0, bottom, onIndexChange, onO
         onMomentumScrollEnd={onScroll}
         renderItem={({ item, index }) => item.__seeAll
           ? <SeeAllCard width={cardW} more={more} onPress={onSeeAll} />
-          : <PreviewCard l={item} width={cardW} active={Math.abs(index - idx) <= 1} onPress={() => onOpen(item)} />}
+          : <PreviewCard l={item} width={cardW} active={Math.abs(index - idx) <= 1} onPress={() => onOpen(item)} outerGesture={outerGesture} />}
       />
+      </GestureDetector>
     </Animated.View>
   );
 }
