@@ -5,8 +5,8 @@
 // casa-libre.com.py, so Google accepts the key. Price-pill markers; tapping one
 // posts the listing id back to RN. Google's logo/attribution are hidden with CSS
 // to match the site's clean brand look.
-import { useMemo, useRef, useEffect } from 'react';
-import { View, Text, Pressable, ActivityIndicator } from 'react-native';
+import { forwardRef, useImperativeHandle, useMemo, useRef, useEffect } from 'react';
+import { View, Text } from 'react-native';
 import { WebView } from 'react-native-webview';
 import Svg, { Path } from 'react-native-svg';
 import { router } from 'expo-router';
@@ -19,8 +19,8 @@ import { getCountry } from '../lib/country';
 // website's CURRENT "my location" control (components/MobileMarketplace.js):
 // 19px glyph, path M12 2 4.5 20.3…, rotate(45deg), Google-gray #3c4043 fill on a
 // white circle with a soft 0 1px 4px rgba(0,0,0,.3) shadow.
-const LOCATE_INK = '#3c4043';
-function NavTriangle({ size = 19, color = LOCATE_INK }) {
+export const LOCATE_INK = '#3c4043';
+export function NavTriangle({ size = 19, color = LOCATE_INK }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={{ transform: [{ rotate: '45deg' }] }}>
       <Path d="M12 2 4.5 20.3l.7.7L12 18l6.8 3 .7-.7z" />
@@ -31,7 +31,7 @@ function NavTriangle({ size = 19, color = LOCATE_INK }) {
 // Soft drop shadow matching the website's shadow-[0_1px_4px_rgba(0,0,0,0.3)] —
 // deliberately NOT the brand hard-offset shadow; the site's locate control is a
 // standard Google-style floating button.
-const locateShadow = {
+export const locateShadow = {
   shadowColor: '#000',
   shadowOffset: { width: 0, height: 1 },
   shadowOpacity: 0.3,
@@ -64,10 +64,9 @@ const CL_MAP_STYLE = [
   { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#7d8d86' }] },
 ];
 
-function buildHtml(points, center, zoom, single, fitBounds) {
+function buildHtml(points, center, zoom, single) {
   const data = JSON.stringify(points);
   const style = JSON.stringify(CL_MAP_STYLE);
-  const fit = fitBounds ? 'true' : 'false';
   return `<!DOCTYPE html><html><head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
@@ -122,11 +121,78 @@ function buildHtml(points, center, zoom, single, fitBounds) {
       + "<circle cx='11' cy='11' r='10' fill='#1a73e8' opacity='0.18'/>"
       + "<circle cx='11' cy='11' r='6' fill='#1a73e8' stroke='#ffffff' stroke-width='2.5'/></svg>";
   }
+  // SELECTED pin (the one shown in the preview carousel): the inverse of a normal
+  // pin — paper fill, ink text + ring — at 1.3x with a soft drop shadow, so it
+  // stands out from the ink pins around it.
+  function selSvg(label){
+    var t = String(label == null ? '•' : label);
+    var h = 32, w = Math.max(40, Math.round(22 + t.length * 9.8)), P = 6;
+    return "<svg xmlns='http://www.w3.org/2000/svg' width='"+(w+P*2)+"' height='"+(h+P*2)+"'>"
+      + "<defs><filter id='s' x='-30%' y='-30%' width='160%' height='170%'><feDropShadow dx='0' dy='2' stdDeviation='2.2' flood-color='#000' flood-opacity='0.35'/></filter></defs>"
+      + "<rect x='"+(P+1.5)+"' y='"+(P+1.5)+"' width='"+(w-3)+"' height='"+(h-3)+"' rx='"+((h-3)/2)+"' fill='"+CREAM+"' stroke='"+INK+"' stroke-width='2.5' filter='url(#s)'/>"
+      + "<text x='"+(P+w/2)+"' y='"+(P+h/2+1)+"' dominant-baseline='middle' text-anchor='middle' font-family='Arial, sans-serif' font-size='15' font-weight='700' fill='"+INK+"'>"+t+"</text></svg>";
+  }
+  function selIcon(p){
+    var t = String(p.label||'•'), P = 6, h = 32 + P*2, w = Math.max(40, Math.round(22 + t.length * 9.8)) + P*2;
+    return { url: uri(selSvg(p.label)), scaledSize: new google.maps.Size(w,h), anchor: new google.maps.Point(w/2, h/2) };
+  }
+  function post(m){ if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(m); }
   function clusterSvg(n){
     var s = 40;
     return "<svg xmlns='http://www.w3.org/2000/svg' width='"+s+"' height='"+s+"'>"
       + "<circle cx='"+(s/2)+"' cy='"+(s/2)+"' r='"+(s/2-2)+"' fill='"+INK+"' stroke='"+CREAM+"' stroke-width='2'/>"
       + "<text x='"+(s/2)+"' y='"+(s/2+1)+"' dominant-baseline='middle' text-anchor='middle' font-family='Arial, sans-serif' font-size='13' font-weight='700' fill='"+CREAM+"'>"+n+"</text></svg>";
+  }
+  // ── Browse-map state. React Native owns filters/selection and drives the map
+  // through the window.__cl* functions below (injectJavaScript) — the WebView is
+  // never reloaded to change pins, so the camera stays wherever the user left it.
+  var byId = {};          // id -> { m: Marker, p: point }
+  var selId = null;       // currently highlighted listing id
+  var insetBottom = 0;    // px hidden under the RN bottom sheet (excluded from reported bounds)
+  var moving = false;
+  function makeMarker(p){
+    var m = new google.maps.Marker({ position:{ lat:p.lat, lng:p.lng }, icon: pillIcon(p), optimized: false, zIndex: p.promoted ? 10000 : undefined });
+    m.addListener('click', function(){ post(p.id); });
+    return m;
+  }
+  function setPoints(arr){
+    var map = window.__clMap, cl = window.__clCluster;
+    if (cl) { try { cl.clearMarkers(true); } catch(e){} }
+    for (var k in byId) { try { byId[k].m.setMap(null); } catch(e){} }
+    byId = {};
+    var keepSel = selId; selId = null;
+    var cm = [];
+    (arr || []).forEach(function(p){
+      var m = makeMarker(p); byId[p.id] = { m: m, p: p };
+      // A paid listing is never swallowed by a cluster — put it straight on the map.
+      if (p.promoted || !cl) m.setMap(map); else cm.push(m);
+    });
+    if (cl) { try { cl.addMarkers(cm); } catch(e){} }
+    if (keepSel && byId[keepSel]) select(keepSel);
+  }
+  function select(id){
+    var map = window.__clMap, cl = window.__clCluster;
+    if (selId && byId[selId]) {
+      var o = byId[selId];
+      o.m.setIcon(pillIcon(o.p)); o.m.setZIndex(o.p.promoted ? 10000 : undefined);
+      if (!o.p.promoted && cl) { o.m.setMap(null); try { cl.addMarker(o.m); } catch(e){} }
+    }
+    selId = null;
+    if (id && byId[id]) {
+      var n = byId[id];
+      // Lift it out of its cluster while selected so it's always visible.
+      if (!n.p.promoted && cl) { try { cl.removeMarker(n.m); } catch(e){} }
+      n.m.setMap(map); n.m.setIcon(selIcon(n.p)); n.m.setZIndex(20000);
+      selId = id;
+    }
+  }
+  function reportBounds(map){
+    var b = map.getBounds(); if (!b) return;
+    var ne = b.getNorthEast(), sw = b.getSouthWest();
+    var h = document.getElementById('map').clientHeight || 1;
+    var n = ne.lat(), s = sw.lat();
+    s = s + (n - s) * Math.min(0.9, insetBottom / h);   // the strip under the sheet isn't "on the map"
+    post('__bounds__:' + n + ',' + s + ',' + ne.lng() + ',' + sw.lng() + ',' + map.getZoom());
   }
   function initMap(){
     var map = new google.maps.Map(document.getElementById('map'), {
@@ -136,59 +202,46 @@ function buildHtml(points, center, zoom, single, fitBounds) {
       // of snapping between integer levels (raster maps default this to false).
       isFractionalZoomEnabled: true,
     });
-    var bounds = new google.maps.LatLngBounds();
-    var clusterMarkers = [];
-    var markers = pts.map(function(p){
-      var icon = single
-        ? { url: uri(dotSvg()), scaledSize: new google.maps.Size(16,16), anchor: new google.maps.Point(8,8) }
-        : pillIcon(p);
-      var m = new google.maps.Marker({ position:{ lat:p.lat, lng:p.lng }, icon: icon, optimized: false, zIndex: (!single && p.promoted) ? 10000 : undefined });
-      m.addListener('click', function(){ if(window.ReactNativeWebView){ window.ReactNativeWebView.postMessage(p.id); } });
-      bounds.extend({ lat:p.lat, lng:p.lng });
-      // A paid listing is never swallowed by a cluster — put it straight on the map.
-      if (!single && p.promoted) { m.setMap(map); } else { clusterMarkers.push(m); }
-      return m;
-    });
-    if (single) {
-      markers.forEach(function(m){ m.setMap(map); });
-    } else if (window.markerClusterer && window.markerClusterer.MarkerClusterer) {
-      window.__clCluster = new markerClusterer.MarkerClusterer({
-        map: map, markers: clusterMarkers,
-        algorithm: new markerClusterer.SuperClusterAlgorithm({ radius: 90, maxZoom: 16 }),
-        renderer: { render: function(o){ return new google.maps.Marker({ position:o.position, zIndex:1000+o.count, optimized: false, icon:{ url: uri(clusterSvg(o.count)), scaledSize: new google.maps.Size(40,40), anchor: new google.maps.Point(20,20) } }); } },
-      });
-      // Re-cluster only AFTER the map settles (debounced), never on intermediate zoom
-      // frames. Both our live double-tap zoom and native two-finger pinch emit many
-      // 'idle' events while zooming; the clusterer renders (removes + re-adds pins) on
-      // each → visible flicker. Debouncing collapses them into ONE clean re-cluster once
-      // motion stops, so the pins hold steady through the whole gesture. This replaces
-      // the clusterer's own idle→render binding (and the double-tap-only pause), covering
-      // pinch too.
-      try {
-        var __c = window.__clCluster;
-        if (__c && __c.idleListener) google.maps.event.removeListener(__c.idleListener);
-        var __rt = null;
-        __c.idleListener = map.addListener('idle', function(){
-          if (__rt) clearTimeout(__rt);
-          __rt = setTimeout(function(){ __rt = null; try { __c.render(); } catch(e){} }, 140);
-        });
-      } catch(e){}
-    } else {
-      clusterMarkers.forEach(function(m){ m.setMap(map); });
-    }
-    if (${fit} && pts.length > 1) { try { map.fitBounds(bounds, 40); } catch(e){} }
     window.__clMap = map;
-    // A "you are here" fly-to that arrived before the map was ready (WebView reload) — apply it now.
+    if (single) {
+      pts.forEach(function(p){
+        new google.maps.Marker({ map: map, position:{ lat:p.lat, lng:p.lng }, optimized: false,
+          icon: { url: uri(dotSvg()), scaledSize: new google.maps.Size(16,16), anchor: new google.maps.Point(8,8) } });
+      });
+    } else {
+      if (window.markerClusterer && window.markerClusterer.MarkerClusterer) {
+        window.__clCluster = new markerClusterer.MarkerClusterer({
+          map: map, markers: [],
+          algorithm: new markerClusterer.SuperClusterAlgorithm({ radius: 90, maxZoom: 16 }),
+          renderer: { render: function(o){ return new google.maps.Marker({ position:o.position, zIndex:1000+o.count, optimized: false, icon:{ url: uri(clusterSvg(o.count)), scaledSize: new google.maps.Size(40,40), anchor: new google.maps.Point(20,20) } }); } },
+          // Cluster tap: zoom into it (default behaviour) and tell RN (closes the preview).
+          onClusterClick: function(ev, cluster, m){ try { m.fitBounds(cluster.bounds); } catch(e){} post('__cluster__'); },
+        });
+        // Re-cluster only AFTER the map settles (debounced), never on intermediate zoom
+        // frames — double-tap-drag and pinch both emit many 'idle' events; rendering on
+        // each flickers the pins. One clean re-cluster once motion stops.
+        try {
+          var __c = window.__clCluster;
+          if (__c && __c.idleListener) google.maps.event.removeListener(__c.idleListener);
+          var __rt = null;
+          __c.idleListener = map.addListener('idle', function(){
+            if (__rt) clearTimeout(__rt);
+            __rt = setTimeout(function(){ __rt = null; try { __c.render(); } catch(e){} }, 140);
+          });
+        } catch(e){}
+      }
+      setPoints(window.__clPts || pts);
+      if (window.__clSel) select(window.__clSel);
+      // Motion protocol: one __moving__ per gesture/animation, then __bounds__ on idle.
+      map.addListener('bounds_changed', function(){ if (!moving) { moving = true; post('__moving__'); } });
+      map.addListener('idle', function(){ moving = false; reportBounds(map); });
+      map.addListener('click', function(){ post('__map_tap__'); });
+      if (window.__clPendingFit) { var f = window.__clPendingFit; window.__clPendingFit = null; window.__clFitTo(f[0], f[1], f[2]); }
+    }
     if (window.__clPendingYou) { try { __clDrawYou(window.__clPendingYou.lat, window.__clPendingYou.lng); } catch(e){} window.__clPendingYou = null; }
-    // A view-restore queued before the map was ready (near-me deselect) — apply it now.
-    if (window.__clPendingRestore) { try { __clDoRestore(window.__clPendingRestore.lat, window.__clPendingRestore.lng, window.__clPendingRestore.zoom); } catch(e){} window.__clPendingRestore = null; }
-    // Report the map view (center+zoom) to RN on every idle, so it can save the
-    // pre-near-me position and restore it on deselect (mirrors the website).
-    if (!single) { map.addListener('idle', function(){ try { var c = map.getCenter(); if (window.ReactNativeWebView) { window.ReactNativeWebView.postMessage('__view__:' + c.lat() + ',' + c.lng() + ',' + map.getZoom()); } } catch(e){} }); }
-    // Near-me stays on until the user taps the triangle again — tapping elsewhere
-    // on the map must NOT deselect it (previously a map 'click' exited near-me).
     setupDblTapZoom(map);
   }
+
   // "Double-tap, hold, and drag to zoom" — the native Google Maps one-finger
   // gesture. The Maps JS API does NOT ship it (only two-finger pinch + a discrete
   // double-tap-to-zoom), so we implement it explicitly and ONLY act once a genuine
@@ -320,21 +373,43 @@ function buildHtml(points, center, zoom, single, fitBounds) {
       icon: { url: uri(youSvg()), scaledSize: new google.maps.Size(22,22), anchor: new google.maps.Point(11,11) },
     });
   }
-  // Called from React Native via injectJavaScript(). If the map isn't ready yet —
-  // the WebView reloads whenever near-me changes the pin set — stash the location
-  // and initMap() applies it once the map exists, so the dot never gets lost.
+  // ── Called from React Native via injectJavaScript(). Each one queues its input
+  // if the Google script hasn't finished loading yet, and initMap() applies it.
   window.__clFlyTo = function(lat, lng){
     if (!window.__clMap) { window.__clPendingYou = { lat: lat, lng: lng }; return; }
     __clDrawYou(lat, lng);
   };
-  // Restore a saved center+zoom (near-me deselect). Queues if the map isn't ready.
-  function __clDoRestore(lat, lng, zoom){
+  window.__clHideYou = function(){ window.__clPendingYou = null; if (window.__clYou) { try { window.__clYou.setMap(null); } catch(e){} window.__clYou = null; } };
+  window.__clSetPoints = function(arr){ window.__clPts = arr; if (window.__clMap && !single) setPoints(arr); };
+  window.__clSelect = function(id){ window.__clSel = id; if (window.__clMap && !single) select(id); };
+  window.__clSetInsets = function(bottom){ insetBottom = bottom || 0; };
+  // Fit the camera to [[lat,lng],…] leaving room for the search bar (top) and sheet (bottom).
+  window.__clFitTo = function(arr, top, bottom){
+    var map = window.__clMap;
+    if (!map) { window.__clPendingFit = [arr, top, bottom]; return; }
+    if (!arr || !arr.length) return;
+    if (arr.length === 1) { map.setCenter({ lat: arr[0][0], lng: arr[0][1] }); map.setZoom(15); return; }
+    var bb = new google.maps.LatLngBounds();
+    arr.forEach(function(p){ bb.extend({ lat: p[0], lng: p[1] }); });
+    try { map.fitBounds(bb, { top: top || 80, bottom: bottom || 80, left: 40, right: 40 }); } catch(e){ map.fitBounds(bb); }
+  };
+  // Pan (never zoom) so a point sits in the free band between the search bar (top px)
+  // and the preview/sheet (bottom px) — only if it isn't already visible there.
+  window.__clEnsureVisible = function(lat, lng, top, bottom){
     var map = window.__clMap; if (!map) return;
-    try { map.setZoom(zoom); map.setCenter({ lat: lat, lng: lng }); } catch(e){}
-  }
-  window.__clRestoreView = function(lat, lng, zoom){
-    if (!window.__clMap) { window.__clPendingRestore = { lat: lat, lng: lng, zoom: zoom }; return; }
-    __clDoRestore(lat, lng, zoom);
+    var b = map.getBounds(); if (!b) return;
+    var ne = b.getNorthEast(), sw = b.getSouthWest();
+    var h = document.getElementById('map').clientHeight || 1;
+    var span = ne.lat() - sw.lat();
+    var topLat = ne.lat() - span * (top / h), botLat = sw.lat() + span * (bottom / h);
+    var w = sw.lng(), e = ne.lng();
+    var inLng = e >= w ? (lng >= w && lng <= e) : (lng >= w || lng <= e);
+    if (inLng && lat <= topLat && lat >= botLat) return;
+    map.panTo({ lat: lat - span * ((bottom - top) / 2) / h, lng: lng });
+  };
+  window.__clZoomOut = function(){
+    var map = window.__clMap; if (!map) return;
+    map.setZoom(Math.max(3, Math.floor(map.getZoom()) - 1));
   };
   window.initMap = initMap;
 </script>
@@ -342,60 +417,59 @@ function buildHtml(points, center, zoom, single, fitBounds) {
 </body></html>`;
 }
 
-export default function PropertyMap({ listings = [], style, single = null, isFiltered = false, onMarkerPress, userLocation = null, nearMe = false, onToggleNear, locating = false }) {
-  const pts = single ? (single.lat && single.lng ? [single] : []) : listings.filter((l) => l.lat && l.lng);
-  const webRef = useRef(null);
-  const lastViewRef = useRef(null);        // latest {lat,lng,zoom} reported by the map on idle
-  const prevViewRef = useRef(null);         // view saved when near-me is turned ON
-  const pendingRestoreRef = useRef(null);   // view to re-apply after the deselect reload
-  const prevNearRef = useRef(nearMe);       // previous nearMe, to detect on/off transitions
-  // Show the "near me" triangle toggle on the browse map only (not the single-property mini-map).
-  const showLocate = !single && typeof onToggleNear === 'function';
+const toPoint = (l) => ({ id: l.id, lat: l.lat, lng: l.lng, label: shortUsd(l.usd), promoted: !!(l.verified || l.plan) });
 
+// Browse map (listings) or the property page's single-pin mini-map (`single`).
+// Browse-mode props: onMoving() when the camera starts moving, onBounds(msg) with
+// "__bounds__:n,s,e,w,zoom" when it settles, onMapTap / onClusterTap, selectedId
+// (highlighted pin), bottomInset (px covered by the sheet). Ref: fitTo, flyTo,
+// ensureVisible, zoomOut.
+const PropertyMap = forwardRef(function PropertyMap({ listings = [], style, single = null, onMarkerPress, onMoving, onBounds, onMapTap, onClusterTap, selectedId = null, bottomInset = 0, userLocation = null, nearMe = false }, ref) {
+  const pts = single ? (single.lat && single.lng ? [single] : []) : listings.filter((l) => l.lat != null && l.lng != null);
+  const webRef = useRef(null);
   const country = getCountry();
+
+  // Built once per country (or per property on the mini-map). Browse pins are
+  // pushed in afterwards, so filters never reload the WebView / reset the camera.
   const html = useMemo(() => {
-    const points = pts.map((l) => ({ id: l.id, lat: l.lat, lng: l.lng, label: shortUsd(l.usd), promoted: !!(l.verified || l.plan) }));
+    const points = single ? pts.map(toPoint) : [];
     const mc = getMapCenter();
     const center = single && single.lat ? { lat: single.lat, lng: single.lng } : { lat: mc.latitude, lng: mc.longitude };
     const zoom = single ? country.singleZoom : country.mapZoom;
-    const fitBounds = !single && isFiltered;
-    return buildHtml(points, center, zoom, !!single, fitBounds);
+    return buildHtml(points, center, zoom, !!single);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pts.length, single?.id, isFiltered, country.code]);
+  }, [single?.id, country.code]);
 
+  const inject = (js) => { if (webRef.current) webRef.current.injectJavaScript(`try{${js}}catch(e){}; true;`); };
+  const pointsKey = single ? '' : pts.map((l) => l.id).join(',');
+  const pushPoints = () => { if (!single) inject(`window.__clSetPoints && window.__clSetPoints(${JSON.stringify(pts.map(toPoint))});`); };
+  const pushSelect = () => { if (!single) inject(`window.__clSelect && window.__clSelect(${JSON.stringify(selectedId)});`); };
+  const pushInsets = () => { if (!single) inject(`window.__clSetInsets && window.__clSetInsets(${Number(bottomInset) || 0});`); };
   const flyTo = (loc) => {
-    if (!loc || !webRef.current) return;
+    if (!loc) return;
     const lat = Number(loc.latitude), lng = Number(loc.longitude);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-    webRef.current.injectJavaScript(`window.__clFlyTo && window.__clFlyTo(${lat}, ${lng}); true;`);
+    inject(`window.__clFlyTo && window.__clFlyTo(${lat}, ${lng});`);
   };
 
-  const restoreView = (v) => {
-    if (!v || !webRef.current) return;
-    webRef.current.injectJavaScript(`window.__clRestoreView && window.__clRestoreView(${v.lat}, ${v.lng}, ${v.zoom}); true;`);
-  };
+  /* eslint-disable react-hooks/exhaustive-deps */
+  useEffect(() => { pushPoints(); }, [pointsKey]);
+  useEffect(() => { pushSelect(); }, [selectedId]);
+  useEffect(() => { pushInsets(); }, [bottomInset]);
+  useEffect(() => { if (!single && !nearMe) inject('window.__clHideYou && window.__clHideYou();'); }, [nearMe]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
-  // When near-me turns on (or the user's coords arrive), fly to them + drop the dot.
-  useEffect(() => { if (nearMe && userLocation) flyTo(userLocation); }, [nearMe, userLocation?.latitude, userLocation?.longitude]);
+  useImperativeHandle(ref, () => ({
+    fitTo(list, { top = 80, bottom = 80 } = {}) {
+      const arr = (list || []).filter((l) => l.lat != null && l.lng != null).map((l) => [Number(l.lat), Number(l.lng)]);
+      inject(`window.__clFitTo && window.__clFitTo(${JSON.stringify(arr)}, ${top}, ${bottom});`);
+    },
+    flyTo,
+    ensureVisible(lat, lng, top, bottom) { inject(`window.__clEnsureVisible && window.__clEnsureVisible(${Number(lat)}, ${Number(lng)}, ${top}, ${bottom});`); },
+    zoomOut() { inject('window.__clZoomOut && window.__clZoomOut();'); },
+  }));
 
-  // Save the map view when near-me turns ON; queue a restore of it when it turns OFF
-  // (the WebView reloads on toggle, so the actual restore runs in onLoadEnd). Mirrors
-  // the website's prevViewRef save/restore.
-  useEffect(() => {
-    const was = prevNearRef.current;
-    if (!was && nearMe) {
-      prevViewRef.current = lastViewRef.current;
-    } else if (was && !nearMe && prevViewRef.current) {
-      pendingRestoreRef.current = prevViewRef.current;
-      prevViewRef.current = null;
-    }
-    prevNearRef.current = nearMe;
-  }, [nearMe]);
-
-  // Only the single-property mini-map falls back to a placeholder when it has no
-  // coords. The browse map ALWAYS renders (with the triangle) — even when a filter
-  // (e.g. near-me far from any listing) yields zero pins — so you can still deselect.
-  if (!pts.length && !showLocate) {
+  if (single && !pts.length) {
     return (
       <View style={[{ backgroundColor: colors.hatch, alignItems: 'center', justifyContent: 'center', padding: 20 }, style]}>
         <Text style={{ fontFamily: fonts.mono, color: colors.ink60, fontSize: 12 }}>Sin ubicación</Text>
@@ -406,16 +480,10 @@ export default function PropertyMap({ listings = [], style, single = null, isFil
   const onMessage = (e) => {
     const data = e?.nativeEvent?.data;
     if (!data) return;
-    // The map reports its center+zoom on every idle → keep the latest so we can
-    // save it when near-me turns on and restore it on deselect.
-    if (data.indexOf('__view__:') === 0) {
-      const p = data.slice(9).split(',');
-      const lat = Number(p[0]), lng = Number(p[1]), zoom = Number(p[2]);
-      if (Number.isFinite(lat) && Number.isFinite(lng) && Number.isFinite(zoom)) lastViewRef.current = { lat, lng, zoom };
-      return;
-    }
-    // A tap on the empty map (not a pin) exits near-me — mirrors the website.
-    if (data === '__near_off__') { if (nearMe && onToggleNear) onToggleNear(); return; }
+    if (data === '__moving__') { if (onMoving) onMoving(); return; }
+    if (data.indexOf('__bounds__:') === 0) { if (onBounds) onBounds(data); return; }
+    if (data === '__map_tap__') { if (onMapTap) onMapTap(); return; }
+    if (data === '__cluster__') { if (onClusterTap) onClusterTap(); return; }
     if (onMarkerPress) onMarkerPress(data);
     else router.push(`/property/${data}`);
   };
@@ -430,33 +498,14 @@ export default function PropertyMap({ listings = [], style, single = null, isFil
         javaScriptEnabled
         domStorageEnabled
         onMessage={onMessage}
-        // The HTML re-memoizes when near-me changes the pin set, so the WebView
-        // reloads. After each (re)load: if near-me is on, re-drop the "you are here"
-        // dot; if it just turned off, restore the pre-near-me view (like the website).
-        onLoadEnd={() => {
-          if (nearMe && userLocation) flyTo(userLocation);
-          else if (!nearMe && pendingRestoreRef.current) { const v = pendingRestoreRef.current; pendingRestoreRef.current = null; restoreView(v); }
-        }}
+        // (Re)load — first mount or a country switch: re-push the current pins,
+        // insets, selection and the "you are here" dot.
+        onLoadEnd={() => { pushInsets(); pushPoints(); pushSelect(); if (nearMe && userLocation) flyTo(userLocation); }}
         setSupportMultipleWindows={false}
         androidLayerType="hardware"
       />
-      {showLocate ? (
-        <Pressable
-          onPress={onToggleNear}
-          accessibilityLabel={nearMe ? 'Near me (on)' : 'Near me'}
-          hitSlop={8}
-          style={({ pressed }) => [{
-            position: 'absolute', right: 16, bottom: 92,
-            width: 44, height: 44, borderRadius: 22,
-            backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center',
-            // Selected = white button with an ink ring (matches the website).
-            borderWidth: nearMe ? 2 : 0, borderColor: colors.ink,
-            ...locateShadow,
-          }, pressed && { transform: [{ translateY: 1 }] }]}
-        >
-          {locating ? <ActivityIndicator size="small" color={LOCATE_INK} /> : <NavTriangle size={19} color={nearMe ? colors.ink : LOCATE_INK} />}
-        </Pressable>
-      ) : null}
     </View>
   );
-}
+});
+
+export default PropertyMap;
