@@ -60,17 +60,29 @@ function Dropdown({ label, value, options, onSelect, open, onToggle }) {
   );
 }
 
-// Search input — used floating on the map and again in the sheet's full header.
-// Both bind the same `q`, so nothing is lost when switching between them.
-function SearchBox({ value, onChange, placeholder, onFocus, floating }) {
+// The ONE real search field. It lives in the sheet's full header, where the
+// keyboard can't cover it; the bar floating on the map is a button that opens
+// the sheet and focuses this (two live inputs bound to one value made focus and
+// the clear button ambiguous).
+function SearchBox({ value, onChange, placeholder, inputRef }) {
   return (
-    <View style={[{ flex: 1, height: floating ? 48 : 44, flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, borderRadius: radii.pill, paddingHorizontal: 14 },
-      floating ? { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.18, shadowRadius: 8, elevation: 5 } : { borderWidth: 1.5, borderColor: colors.ink12 }]}>
+    <View style={{ flex: 1, height: 44, flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, borderRadius: radii.pill, paddingHorizontal: 14, borderWidth: 1.5, borderColor: colors.ink12 }}>
       <Ionicons name="search" size={17} color={colors.ink45} />
-      <TextInput value={value} onChangeText={onChange} onFocus={onFocus} placeholder={placeholder} placeholderTextColor={colors.ink45}
+      <TextInput ref={inputRef} value={value} onChangeText={onChange} placeholder={placeholder} placeholderTextColor={colors.ink45}
         style={{ flex: 1, paddingVertical: 8, marginLeft: 8, fontFamily: fonts.sans, fontSize: 15, color: colors.ink }} returnKeyType="search" />
-      {value ? <Pressable onPress={() => onChange('')} hitSlop={8}><Ionicons name="close-circle" size={17} color={colors.ink30} /></Pressable> : null}
+      {value ? <Pressable onPress={() => onChange('')} hitSlop={10}><Ionicons name="close-circle" size={18} color={colors.ink30} /></Pressable> : null}
     </View>
+  );
+}
+
+// Map-state search bar: a button, not a field.
+function SearchBar({ value, placeholder, onPress, onClear }) {
+  return (
+    <Pressable onPress={onPress} style={{ flex: 1, height: 48, flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, borderRadius: radii.pill, paddingHorizontal: 14, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.18, shadowRadius: 8, elevation: 5 }}>
+      <Ionicons name="search" size={17} color={colors.ink45} />
+      <Text numberOfLines={1} style={{ flex: 1, marginLeft: 8, fontFamily: fonts.sans, fontSize: 15, color: value ? colors.ink : colors.ink45 }}>{value || placeholder}</Text>
+      {value ? <Pressable onPress={onClear} hitSlop={12}><Ionicons name="close-circle" size={18} color={colors.ink30} /></Pressable> : null}
+    </Pressable>
   );
 }
 
@@ -92,6 +104,7 @@ export default function Marketplace() {
   const navigation = useNavigation();
   const mapRef = useRef(null);
   const sheetRef = useRef(null);
+  const searchInputRef = useRef(null);
 
   const [raw, setRaw] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -134,7 +147,10 @@ export default function Marketplace() {
   }, [mode, code]); // refetch against the active country's API when it changes
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { const id = setTimeout(() => setDq(q), 400); return () => clearTimeout(id); }, [q]);
+  // Typing re-filters the catalogue AND rebuilds every map pin (a ~280 KB payload
+  // that makes the WebView recreate thousands of markers), so that work waits for
+  // a pause in typing — otherwise the keyboard and the clear button stutter.
+  useEffect(() => { const id = setTimeout(() => setDq(q), 300); return () => clearTimeout(id); }, [q]);
 
   const requestLocation = useCallback(async () => {
     if (userLoc) return userLoc;
@@ -154,10 +170,10 @@ export default function Marketplace() {
   }, [nearMe, userLoc, requestLocation]);
 
   const filtered = useMemo(
-    () => applyFilters(raw, { q, typeF, bedF, priceF, mode, sort, nearMe, userLoc }),
-    [raw, q, typeF, bedF, priceF, sort, mode, nearMe, userLoc],
+    () => applyFilters(raw, { q: dq, typeF, bedF, priceF, mode, sort, nearMe, userLoc }),
+    [raw, dq, typeF, bedF, priceF, sort, mode, nearMe, userLoc],
   );
-  const { withCoords, noCoords } = useMemo(() => splitNoCoords(filtered), [filtered]);
+  const { withCoords } = useMemo(() => splitNoCoords(filtered), [filtered]);
   const areaList = useMemo(() => filterInBounds(filtered, bounds), [filtered, bounds]);
   const byId = useMemo(() => new Map(raw.map((l) => [l.id, l])), [raw]);
 
@@ -167,7 +183,15 @@ export default function Marketplace() {
 
   const activeCount = (typeF !== 'all' ? 1 : 0) + (priceF !== 'all' ? 1 : 0) + (bedF !== 'all' ? 1 : 0) + (sort !== 'relevancia' ? 1 : 0);
   const clearFilters = () => { setTypeF('all'); setPriceF('all'); setBedF('all'); setSort('relevancia'); };
-  const clearAll = () => { clearFilters(); setQ(''); setDq(''); setNearMe(false); };
+  const clearQuery = () => { setQ(''); setDq(''); };
+  const clearAll = () => { clearFilters(); clearQuery(); setNearMe(false); };
+  // The collapsed sheet sits exactly where the keyboard appears, so it can't be
+  // dragged while typing — opening the search raises the sheet to full first.
+  const openSearch = () => {
+    setPreview(null);
+    sheetRef.current?.snapTo('full');
+    setTimeout(() => searchInputRef.current?.focus(), 260);
+  };
 
   // ── Map motion → loading state → in-area list (held ≥300 ms so it doesn't flicker)
   const movingSince = useRef(0);
@@ -280,7 +304,7 @@ export default function Marketplace() {
         </Pressable>
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <SearchBox value={q} onChange={setQ} placeholder={t('searchPlaceholder')} />
+        <SearchBox value={q} onChange={setQ} placeholder={t('searchPlaceholder')} inputRef={searchInputRef} />
         <FiltersButton count={activeCount} onPress={openFilters} />
       </View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', rowGap: 8 }}>
@@ -315,7 +339,7 @@ export default function Marketplace() {
         pointerEvents={snap === 'full' ? 'none' : 'box-none'}
         style={[{ position: 'absolute', top: insets.top + 8, left: 12, right: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }, searchFade]}
       >
-        <SearchBox value={q} onChange={setQ} placeholder={t('searchPlaceholder')} onFocus={closePreview} floating />
+        <SearchBar value={q} placeholder={t('searchPlaceholder')} onPress={openSearch} onClear={clearQuery} />
         <FiltersButton count={activeCount} onPress={openFilters} floating />
       </Animated.View>
 
@@ -362,7 +386,6 @@ export default function Marketplace() {
           onClearFilters={clearAll}
           onRetry={load}
           data={areaList}
-          noCoords={noCoords}
           listResetKey={listResetKey}
         />
       ) : null}

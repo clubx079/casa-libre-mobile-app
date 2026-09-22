@@ -10,11 +10,9 @@
 // screen px) so it can fade/move its own map overlays with the sheet.
 // The list only scrolls at full; pulling down while it's at the top drags the sheet.
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { View, Text, Pressable, ActivityIndicator, Modal, FlatList } from 'react-native';
+import { View, Text, Pressable, ActivityIndicator } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, useAnimatedScrollHandler, withSpring, interpolate, Extrapolation, runOnJS } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
 import { colors, fonts, radii } from '../lib/theme';
 import { useI18n } from '../lib/i18n';
 import PropertyCard from './PropertyCard';
@@ -40,7 +38,7 @@ function Pill({ label, onPress, dark }) {
 const ListingsSheet = forwardRef(function ListingsSheet({
   H, topInset, sheetY, onSnapChange, header,
   status, count, globalCount, onZoomOut, onClearFilters, onRetry,
-  data, noCoords = [], listResetKey,
+  data, listResetKey,
 }, ref) {
   const { t } = useI18n();
   const snaps = sheetSnaps(H, topInset);
@@ -48,7 +46,6 @@ const ListingsSheet = forwardRef(function ListingsSheet({
   const [snap, setSnap] = useState('collapsed');
   const snapRef = useRef('collapsed');
   const [page, setPage] = useState(1);
-  const [noCoordsOpen, setNoCoordsOpen] = useState(false);
   const listRef = useRef(null);
 
   const scrollY = useSharedValue(0);
@@ -164,14 +161,6 @@ const ListingsSheet = forwardRef(function ListingsSheet({
     );
   }
 
-  const footer = noCoords.length && status !== 'boot' ? (
-    <Pressable onPress={() => setNoCoordsOpen(true)} style={{ paddingVertical: 16, alignItems: 'center', borderTopWidth: 1, borderTopColor: colors.ink08 }}>
-      <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.ink60 }}>
-        + {noCoords.length} {t('noCoordsRow')} · <Text style={{ color: colors.ink, textDecorationLine: 'underline' }}>{t('see')}</Text>
-      </Text>
-    </Pressable>
-  ) : null;
-
   return (
     <Animated.View
       style={[{
@@ -214,27 +203,11 @@ const ListingsSheet = forwardRef(function ListingsSheet({
               scrollEventThrottle={16}
               onEndReachedThreshold={0.5}
               onEndReached={() => { if (visible.length < (data || []).length) setPage((p) => p + 1); }}
-              ListFooterComponent={footer}
             />
           </GestureDetector>
         </View>
       </GestureDetector>
 
-      {/* Listings without coordinates — can't be on the map, so they live here. */}
-      <Modal visible={noCoordsOpen} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setNoCoordsOpen(false)}>
-        <View style={{ flex: 1, backgroundColor: colors.paper }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, paddingBottom: 8 }}>
-            <Text style={{ fontFamily: fonts.sansBold, fontSize: 20, color: colors.ink }}>{t('noCoordsTitle')} · {noCoords.length}</Text>
-            <Pressable onPress={() => setNoCoordsOpen(false)} hitSlop={10}><Ionicons name="close" size={24} color={colors.ink} /></Pressable>
-          </View>
-          <FlatList
-            data={noCoords}
-            keyExtractor={(l) => l.id}
-            contentContainerStyle={{ padding: 16 }}
-            renderItem={({ item }) => <PropertyCard listing={item} onPress={() => { setNoCoordsOpen(false); router.push(`/property/${item.id}`); }} />}
-          />
-        </View>
-      </Modal>
     </Animated.View>
   );
 });
