@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { View, Text, FlatList, ActivityIndicator, Pressable, Alert } from 'react-native';
 import MascotLoader from '../components/MascotLoader';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, fonts, radii } from '../lib/theme';
 import { useI18n } from '../lib/i18n';
@@ -36,6 +36,8 @@ export default function MyListings() {
   }, [user]);
 
   useEffect(() => { if (!authLoading) load(); }, [authLoading, load]);
+  // Coming back from the browser after publishing → pick up the new listing.
+  useFocusEffect(useCallback(() => { if (!authLoading) load(); }, [authLoading, load]));
 
   const del = (id) => {
     Alert.alert(
@@ -78,7 +80,7 @@ export default function MyListings() {
           <Text style={{ fontFamily: fonts.sans, fontSize: 15, color: colors.ink60, textAlign: 'center' }}>
             {lang === 'en' ? "You haven't published any properties yet." : 'Todavía no publicaste ninguna propiedad.'}
           </Text>
-          <View style={{ alignSelf: 'stretch' }}><Button label={t('listForFree')} onPress={() => router.push('/publish')} /></View>
+          <View style={{ alignSelf: 'stretch' }}><Button label={t('listForFree')} onPress={() => router.push('/(tabs)/publish')} /></View>
         </View>
       ) : (
         <FlatList
@@ -94,10 +96,24 @@ export default function MyListings() {
                     {STATUS_LABEL[item.admin_status] || item.admin_status || (lang === 'en' ? 'Active' : 'Activa')}
                   </Text>
                 </View>
-                <Pressable onPress={() => del(item.id)} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                  <Ionicons name="trash-outline" size={15} color={colors.danger} />
-                  <Text style={{ fontFamily: fonts.sansMed, fontSize: 13, color: colors.danger }}>{lang === 'en' ? 'Delete' : 'Eliminar'}</Text>
-                </Pressable>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Pressable
+                    onPress={() => router.push(`/property/${item.id}`)}
+                    hitSlop={8}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 6, borderRadius: radii.pill, borderWidth: 1.5, borderColor: colors.ink, backgroundColor: colors.card }}
+                  >
+                    <Ionicons name="eye-outline" size={15} color={colors.ink} />
+                    <Text style={{ fontFamily: fonts.sansMed, fontSize: 13, color: colors.ink }}>{lang === 'en' ? 'View' : 'Ver'}</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => del(item.id)}
+                    hitSlop={8}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 6, borderRadius: radii.pill, borderWidth: 1.5, borderColor: colors.danger, backgroundColor: colors.card }}
+                  >
+                    <Ionicons name="trash-outline" size={15} color={colors.danger} />
+                    <Text style={{ fontFamily: fonts.sansMed, fontSize: 13, color: colors.danger }}>{lang === 'en' ? 'Delete' : 'Eliminar'}</Text>
+                  </Pressable>
+                </View>
               </View>
             </View>
           )}
