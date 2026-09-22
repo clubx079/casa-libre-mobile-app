@@ -45,23 +45,23 @@ const MAPS_KEY = 'AIzaSyBRMxUxsq4taEGbcelOv-IvlJk6R36IbLA';
 
 // Casa Libre basemap — copied verbatim from the website (utils/gmap.js CL_MAP_STYLE).
 const CL_MAP_STYLE = [
-  { elementType: 'geometry', stylers: [{ color: '#E6DDCD' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#4b4942' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#F3ECDF' }, { weight: 2 }] },
+  { elementType: 'geometry', stylers: [{ color: '#D8CBB2' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#403E37' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#E7DCC6' }, { weight: 2 }] },
   { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
   { featureType: 'administrative', elementType: 'geometry', stylers: [{ visibility: 'off' }] },
   { featureType: 'administrative.land_parcel', stylers: [{ visibility: 'off' }] },
   { featureType: 'poi', stylers: [{ visibility: 'off' }] },
-  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#D5DFBE' }, { visibility: 'on' }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#FFFFFF' }] },
-  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#D8CFBB' }] },
-  { featureType: 'road.arterial', elementType: 'geometry', stylers: [{ color: '#FBF7EF' }] },
-  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#F4EEE0' }] },
-  { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#CFC4AC' }] },
+  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#C2CFA4' }, { visibility: 'on' }] },
+  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#FBF7EF' }] },
+  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#C6B99F' }] },
+  { featureType: 'road.arterial', elementType: 'geometry', stylers: [{ color: '#F6F0E3' }] },
+  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#EFE6D2' }] },
+  { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#BCAE91' }] },
   { featureType: 'road.local', elementType: 'labels', stylers: [{ visibility: 'off' }] },
   { featureType: 'transit', stylers: [{ visibility: 'off' }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#C4D3CC' }] },
-  { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#7d8d86' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#AFC3BA' }] },
+  { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#6b7a73' }] },
 ];
 
 function buildHtml(points, center, zoom, single) {
@@ -71,7 +71,7 @@ function buildHtml(points, center, zoom, single) {
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
 <style>
-  html,body,#map{height:100%;margin:0;padding:0;background:#E6DDCD;overflow:hidden;}
+  html,body,#map{height:100%;margin:0;padding:0;background:#D8CBB2;overflow:hidden;}
   /* Hide Google's on-map branding/attribution to match the website's clean look. */
   .gm-style-cc, .gmnoprint, .gm-bundled-control,
   a[href^="https://maps.google"], a[href^="http://maps.google"],
@@ -425,7 +425,12 @@ const toPoint = (l) => ({ id: l.id, lat: l.lat, lng: l.lng, label: shortUsd(l.us
 // (highlighted pin), bottomInset (px covered by the sheet). Ref: fitTo, flyTo,
 // ensureVisible, zoomOut.
 const PropertyMap = forwardRef(function PropertyMap({ listings = [], style, single = null, onMarkerPress, onMoving, onBounds, onMapTap, onClusterTap, selectedId = null, bottomInset = 0, userLocation = null, nearMe = false }, ref) {
-  const pts = single ? (single.lat && single.lng ? [single] : []) : listings.filter((l) => l.lat != null && l.lng != null);
+  // Memoised so a selection change (which re-renders on every carousel swipe)
+  // never re-walks the whole catalogue.
+  const pts = useMemo(
+    () => (single ? (single.lat && single.lng ? [single] : []) : listings.filter((l) => l.lat != null && l.lng != null)),
+    [listings, single?.id, single?.lat, single?.lng],
+  );
   const webRef = useRef(null);
   const country = getCountry();
 
@@ -440,9 +445,9 @@ const PropertyMap = forwardRef(function PropertyMap({ listings = [], style, sing
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [single?.id, country.code]);
 
+  const points = useMemo(() => pts.map(toPoint), [pts]);
   const inject = (js) => { if (webRef.current) webRef.current.injectJavaScript(`try{${js}}catch(e){}; true;`); };
-  const pointsKey = single ? '' : pts.map((l) => l.id).join(',');
-  const pushPoints = () => { if (!single) inject(`window.__clSetPoints && window.__clSetPoints(${JSON.stringify(pts.map(toPoint))});`); };
+  const pushPoints = () => { if (!single) inject(`window.__clSetPoints && window.__clSetPoints(${JSON.stringify(points)});`); };
   const pushSelect = () => { if (!single) inject(`window.__clSelect && window.__clSelect(${JSON.stringify(selectedId)});`); };
   const pushInsets = () => { if (!single) inject(`window.__clSetInsets && window.__clSetInsets(${Number(bottomInset) || 0});`); };
   const flyTo = (loc) => {
@@ -453,7 +458,7 @@ const PropertyMap = forwardRef(function PropertyMap({ listings = [], style, sing
   };
 
   /* eslint-disable react-hooks/exhaustive-deps */
-  useEffect(() => { pushPoints(); }, [pointsKey]);
+  useEffect(() => { pushPoints(); }, [points]);
   useEffect(() => { pushSelect(); }, [selectedId]);
   useEffect(() => { pushInsets(); }, [bottomInset]);
   useEffect(() => { if (!single && !nearMe) inject('window.__clHideYou && window.__clHideYou();'); }, [nearMe]);

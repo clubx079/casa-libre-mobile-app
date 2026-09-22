@@ -1,5 +1,6 @@
 // Marketplace / saved list card. Image (or hatch placeholder), mode badge,
 // USD primary price (+/mes for rent), ₲ secondary, title, meta, save heart.
+import { memo } from 'react';
 import { View, Text, Pressable } from 'react-native';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
@@ -11,7 +12,9 @@ import Hatch from './Hatch';
 import SaveButton from './SaveButton';
 import { MaterialIcons } from '@expo/vector-icons';
 
-export default function PropertyCard({ listing: l, onPress }) {
+// Memoised: the map-first screen re-renders the sheet on every map move and
+// carousel swipe — without this every visible card re-renders with it.
+function PropertyCard({ listing: l, onPress }) {
   const { lang, t } = useI18n();
   const per = l.mode === 'alquiler' ? (lang === 'en' ? '/mo' : '/mes') : '';
   const go = onPress || (() => router.push(`/property/${l.id}`));
@@ -61,3 +64,5 @@ export default function PropertyCard({ listing: l, onPress }) {
     </Pressable>
   );
 }
+
+export default memo(PropertyCard, (a, b) => a.listing === b.listing && a.onPress === b.onPress);
