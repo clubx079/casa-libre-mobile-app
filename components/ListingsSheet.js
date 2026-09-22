@@ -130,6 +130,10 @@ const ListingsSheet = forwardRef(function ListingsSheet({
     const p = interpolate(sheetY.value, [full, half], [1, 0], Extrapolation.CLAMP);
     return { height: hdrH.value * p, opacity: p };
   });
+  // At full the search bar sits right on top of the grabber, so fade it out there.
+  const grabStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(sheetY.value, [full, full + 60], [0, 1], Extrapolation.CLAMP),
+  }));
 
   const visible = (data || []).slice(0, page * PER_PAGE);
   const isFull = snap === 'full';
@@ -171,9 +175,9 @@ const ListingsSheet = forwardRef(function ListingsSheet({
     >
       <GestureDetector gesture={headerPan}>
         <View>
-          <View style={{ alignItems: 'center', paddingTop: 8, paddingBottom: 6 }}>
+          <Animated.View style={[{ alignItems: 'center', paddingTop: 8, paddingBottom: 6 }, grabStyle]}>
             <View style={{ width: 40, height: 5, borderRadius: 3, backgroundColor: colors.ink30 }} />
-          </View>
+          </Animated.View>
           <Animated.View style={[{ overflow: 'hidden' }, hdrStyle]} pointerEvents={isFull ? 'auto' : 'none'}>
             <View style={{ position: 'absolute', left: 0, right: 0, top: 0 }} onLayout={(e) => { hdrH.value = e.nativeEvent.layout.height; }}>
               {header}

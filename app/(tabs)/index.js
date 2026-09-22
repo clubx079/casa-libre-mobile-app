@@ -24,7 +24,6 @@ import { applyFilters, splitNoCoords, filterInBounds, sortByDistance, parseBound
 import PropertyMap, { NavTriangle, locateShadow, LOCATE_INK } from '../../components/PropertyMap';
 import ListingsSheet, { COLLAPSED_H, sheetSnaps } from '../../components/ListingsSheet';
 import PinPreview, { PREVIEW_H } from '../../components/PinPreview';
-import Wordmark from '../../components/Wordmark';
 import BottomSheet from '../../components/BottomSheet';
 
 const PREVIEW_MAX = 30;
@@ -60,37 +59,24 @@ function Dropdown({ label, value, options, onSelect, open, onToggle }) {
   );
 }
 
-// The ONE real search field. It lives in the sheet's full header, where the
-// keyboard can't cover it; the bar floating on the map is a button that opens
-// the sheet and focuses this (two live inputs bound to one value made focus and
-// the clear button ambiguous).
-function SearchBox({ value, onChange, placeholder, inputRef }) {
+// The ONE search field. The bar is rendered ABOVE the sheet and stays at the top
+// of the screen, so as the sheet rises to full it simply lands on the sheet's own
+// paper — the map's search bar and the list's search bar are the same control.
+function SearchBox({ value, onChange, placeholder, onFocus, inputRef }) {
   return (
-    <View style={{ flex: 1, height: 44, flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, borderRadius: radii.pill, paddingHorizontal: 14, borderWidth: 1.5, borderColor: colors.ink12 }}>
+    <View style={{ flex: 1, height: 48, flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, borderRadius: radii.pill, paddingHorizontal: 14, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.18, shadowRadius: 8, elevation: 5 }}>
       <Ionicons name="search" size={17} color={colors.ink45} />
-      <TextInput ref={inputRef} value={value} onChangeText={onChange} placeholder={placeholder} placeholderTextColor={colors.ink45}
+      <TextInput ref={inputRef} value={value} onChangeText={onChange} onFocus={onFocus} placeholder={placeholder} placeholderTextColor={colors.ink45}
         style={{ flex: 1, paddingVertical: 8, marginLeft: 8, fontFamily: fonts.sans, fontSize: 15, color: colors.ink }} returnKeyType="search" />
-      {value ? <Pressable onPress={() => onChange('')} hitSlop={10}><Ionicons name="close-circle" size={18} color={colors.ink30} /></Pressable> : null}
+      {value ? <Pressable onPress={() => onChange('')} hitSlop={12}><Ionicons name="close-circle" size={18} color={colors.ink30} /></Pressable> : null}
     </View>
   );
 }
 
-// Map-state search bar: a button, not a field.
-function SearchBar({ value, placeholder, onPress, onClear }) {
-  return (
-    <Pressable onPress={onPress} style={{ flex: 1, height: 48, flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, borderRadius: radii.pill, paddingHorizontal: 14, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.18, shadowRadius: 8, elevation: 5 }}>
-      <Ionicons name="search" size={17} color={colors.ink45} />
-      <Text numberOfLines={1} style={{ flex: 1, marginLeft: 8, fontFamily: fonts.sans, fontSize: 15, color: value ? colors.ink : colors.ink45 }}>{value || placeholder}</Text>
-      {value ? <Pressable onPress={onClear} hitSlop={12}><Ionicons name="close-circle" size={18} color={colors.ink30} /></Pressable> : null}
-    </Pressable>
-  );
-}
-
-function FiltersButton({ count, onPress, floating }) {
+function FiltersButton({ count, onPress }) {
   const on = !!count;
   return (
-    <Pressable onPress={onPress} accessibilityLabel="Filtros" style={[{ height: floating ? 48 : 44, minWidth: floating ? 48 : 44, paddingHorizontal: on ? 14 : 0, borderRadius: radii.pill, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: on ? colors.ink : colors.card },
-      floating ? { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.18, shadowRadius: 8, elevation: 5 } : { borderWidth: 1.5, borderColor: colors.ink }]}>
+    <Pressable onPress={onPress} accessibilityLabel="Filtros" style={{ height: 48, minWidth: 48, paddingHorizontal: on ? 14 : 0, borderRadius: radii.pill, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: on ? colors.ink : colors.card, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.18, shadowRadius: 8, elevation: 5 }}>
       <Ionicons name="options-outline" size={20} color={on ? colors.paper : colors.ink} />
       {on ? <Text style={{ fontFamily: fonts.monoMed, fontSize: 13, color: colors.paper }}>{count}</Text> : null}
     </Pressable>
@@ -98,7 +84,7 @@ function FiltersButton({ count, onPress, floating }) {
 }
 
 export default function Marketplace() {
-  const { t, lang, setLang } = useI18n();
+  const { t, lang } = useI18n();
   const { code } = useCountry();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
@@ -185,13 +171,6 @@ export default function Marketplace() {
   const clearFilters = () => { setTypeF('all'); setPriceF('all'); setBedF('all'); setSort('relevancia'); };
   const clearQuery = () => { setQ(''); setDq(''); };
   const clearAll = () => { clearFilters(); clearQuery(); setNearMe(false); };
-  // The collapsed sheet sits exactly where the keyboard appears, so it can't be
-  // dragged while typing — opening the search raises the sheet to full first.
-  const openSearch = () => {
-    setPreview(null);
-    sheetRef.current?.snapTo('full');
-    setTimeout(() => searchInputRef.current?.focus(), 260);
-  };
 
   // ── Map motion → loading state → in-area list (held ≥300 ms so it doesn't flicker)
   const movingSince = useRef(0);
@@ -266,9 +245,6 @@ export default function Marketplace() {
   const openFilters = () => { setPreview(null); Keyboard.dismiss(); setFiltersOpen(true); };
 
   // ── Overlays that follow the sheet ───────────────────────────────────────────
-  const searchFade = useAnimatedStyle(() => ({
-    opacity: interpolate(sheetY.value, [snaps.full, snaps.half], [0, 1], Extrapolation.CLAMP),
-  }));
   const locateStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: sheetY.value - 60 }],
     opacity: interpolate(sheetY.value, [snaps.full, snaps.half], [0, 1], Extrapolation.CLAMP),
@@ -291,22 +267,13 @@ export default function Marketplace() {
     );
   };
 
-  // Rows shown at the top of the sheet only when it's fully open.
+  // Shown at the top of the sheet only when it's fully open: room for the search
+  // bar that sits above it, then the mode chips. (The wordmark and the ES/EN
+  // toggle live on the Account tab — no need to repeat them here.)
   const sheetHeader = (
-    <View style={{ paddingHorizontal: 16, paddingBottom: 4, gap: 10 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Wordmark size={20} />
-        <Pressable onPress={() => setLang(lang === 'es' ? 'en' : 'es')} style={{ flexDirection: 'row', borderWidth: 1.5, borderColor: colors.ink, borderRadius: radii.pill, overflow: 'hidden' }}>
-          {['ES', 'EN'].map((L) => {
-            const on = (L === 'ES') === (lang === 'es');
-            return <Text key={L} style={{ paddingHorizontal: 12, paddingVertical: 5, fontFamily: fonts.mono, fontSize: 12, color: on ? colors.paper : colors.ink, backgroundColor: on ? colors.ink : 'transparent' }}>{L}</Text>;
-          })}
-        </Pressable>
-      </View>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <SearchBox value={q} onChange={setQ} placeholder={t('searchPlaceholder')} inputRef={searchInputRef} />
-        <FiltersButton count={activeCount} onPress={openFilters} />
-      </View>
+    <View style={{ paddingHorizontal: 16, paddingBottom: 4 }}>
+      {/* clears the search bar above (bar: top+8, 48 tall) minus the grabber row */}
+      <View style={{ height: 45 }} />
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', rowGap: 8 }}>
         <ModeChip k="all" label={t('all')} />
         <ModeChip k="venta" label={t('buy')} />
@@ -333,15 +300,6 @@ export default function Marketplace() {
         userLocation={userLoc}
         nearMe={nearMe}
       />
-
-      {/* Floating search + filters (map state). Fades out as the sheet opens. */}
-      <Animated.View
-        pointerEvents={snap === 'full' ? 'none' : 'box-none'}
-        style={[{ position: 'absolute', top: insets.top + 8, left: 12, right: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }, searchFade]}
-      >
-        <SearchBar value={q} placeholder={t('searchPlaceholder')} onPress={openSearch} onClear={clearQuery} />
-        <FiltersButton count={activeCount} onPress={openFilters} floating />
-      </Animated.View>
 
       {/* Near-me toggle — rides just above the sheet's top edge. */}
       {H > 0 && !preview ? (
@@ -400,6 +358,14 @@ export default function Marketplace() {
           <Text style={{ fontFamily: fonts.sansMed, fontSize: 15, color: colors.paper }}>{t('map')}</Text>
         </Pressable>
       ) : null}
+
+      {/* The single search + filters bar. Drawn above the sheet so it stays put at
+          the top of the screen: on the map it floats, and when the sheet reaches
+          full it is sitting on the sheet's own header. */}
+      <View style={{ position: 'absolute', top: insets.top + 8, left: 12, right: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <SearchBox value={q} onChange={setQ} placeholder={t('searchPlaceholder')} onFocus={closePreview} inputRef={searchInputRef} />
+        <FiltersButton count={activeCount} onPress={openFilters} />
+      </View>
 
       {/* Filters popup */}
       <BottomSheet visible={filtersOpen} onClose={() => setFiltersOpen(false)}>
