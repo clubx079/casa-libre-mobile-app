@@ -1,15 +1,23 @@
 // Pin preview carousel — slides up above the listings sheet when a map pin is
 // tapped. Swipe the card body left/right through the tapped listing and its
 // nearest in-view neighbours (max 30, then a "see all in the list" card); swipe
-// the PHOTO to page through that listing's images.
+// the PHOTO to page through that listing's images; tap anywhere to open it.
 //
-// The parent highlights the pin of whichever card is showing, so the index is
+// WHY THE PHOTO PAGER IS NOT A ScrollView/FlatList: it lives inside the card
+// carousel, which IS a horizontal ScrollView. On Android a parent ScrollView
+// intercepts a horizontal drag as soon as it passes touch slop — before a nested
+// horizontal ScrollView can start — so the photos never moved and the card slid
+// instead. A gesture-handler Pan wins that fight (an activating handler tells its
+// ancestors to stop intercepting) and blocksExternalGesture() makes the relation
+// explicit, so photo drags page photos while drags on the info row change property.
+//
+// The parent highlights the pin of whichever card is showing, so the card index is
 // reported while the finger is still moving (onScroll, at the half-way point) —
 // waiting for onMomentumScrollEnd made the pin visibly lag behind the card.
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, FlatList, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { FadeInDown, FadeOutDown } from 'react-native-reanimated';
+import Animated, { FadeInDown, FadeOutDown, useAnimatedStyle, useSharedValue, withSpring, runOnJS } from 'react-native-reanimated';
 import { Image } from 'expo-image';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { colors, fonts, radii, softShadow } from '../lib/theme';
@@ -23,7 +31,8 @@ import SaveButton from './SaveButton';
 const IMG_H = 132;
 export const PREVIEW_H = IMG_H + 96; // card height — the parent keeps the pin above it
 const GAP = 10;
-const MAX_DOTS = 6;
+const DOT_WINDOW = 5;                 // dots drawn at once, whatever the photo count
+const SNAP = { damping: 24, stiffness: 240, mass: 0.7 };
 
 // The browse feed is slim (one cover image per listing), so the rest of a
 // listing's photos are fetched once, on demand, when its card comes into view.
@@ -31,8 +40,11 @@ const imgCache = new Map();
 
 function useImages(l, active) {
   const [imgs, setImgs] = useState(() => imgCache.get(l.id) || null);
+  const local = l.images && l.images.length ? l.images : null;   // already-full listing
   useEffect(() => {
-    if (!active || imgCache.has(l.id)) { if (imgCache.has(l.id)) setImgs(imgCache.get(l.id)); return; }
+    if (local) return;
+    if (imgCache.has(l.id)) { setImgs(imgCache.get(l.id)); return; }
+    if (!active) return;
     let alive = true;
     fetchListing(l.id)
       .then((d) => {
@@ -42,58 +54,82 @@ function useImages(l, active) {
       })
       .catch(() => {});
     return () => { alive = false; };
-  }, [l.id, active]);
+  }, [l.id, active, local]);
+  if (local) return local;
   return imgs && imgs.length ? imgs : (l.image ? [l.image] : []);
 }
 
-// Photo pager. It measures its OWN width (onLayout) instead of taking the card's:
-// the card has a 1–1.5px border, so paging by the card width drifts a couple of
-// pixels per swipe and eventually shows two photos at once over the text.
-//
-// `outerGesture` is the card carousel's scroll gesture: the photo strip BLOCKS it,
-// so a horizontal swipe on the photo pages the photos instead of sliding the card
-// to the next property (a swipe lower down, on the info, still changes property).
-function Photos({ l, active, outerGesture }) {
+// Instagram-style dots: at most DOT_WINDOW are drawn and the edge ones shrink, so
+// 3 photos and 30 photos both get dots instead of a "6/11" counter.
+function Dots({ n, i }) {
+  if (n < 2) return null;
+  const half = Math.floor(DOT_WINDOW / 2);
+  const first = Math.min(Math.max(0, i - half), Math.max(0, n - DOT_WINDOW));
+  const last = Math.min(n - 1, first + DOT_WINDOW - 1);
+  const out = [];
+  for (let k = first; k <= last; k++) {
+    const edge = (k === first && first > 0) || (k === last && last < n - 1);
+    const size = k === i ? 7 : edge ? 4 : 5.5;
+    out.push(<View key={k} style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: k === i ? '#fff' : 'rgba(255,255,255,0.6)' }} />);
+  }
+  return (
+    <View pointerEvents="none" style={{ position: 'absolute', bottom: 8, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(17,17,17,0.45)', paddingHorizontal: 9, paddingVertical: 5, borderRadius: radii.pill }}>
+      {out}
+    </View>
+  );
+}
+
+function Photos({ l, active, outerGesture, onPress }) {
   const images = useImages(l, active);
   const [w, setW] = useState(0);
   const [i, setI] = useState(0);
-  useEffect(() => { setI(0); }, [l.id]);
-  const inner = useMemo(() => Gesture.Native().blocksExternalGesture(outerGesture), [outerGesture]);
+  const x = useSharedValue(0);
+  const startX = useSharedValue(0);
+  const n = images.length;
+
+  useEffect(() => { setI(0); x.value = 0; }, [l.id, w]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const pan = useMemo(() => Gesture.Pan()
+    .activeOffsetX([-6, 6])
+    .failOffsetY([-14, 14])
+    .blocksExternalGesture(outerGesture)
+    .onStart(() => { startX.value = x.value; })
+    .onUpdate((e) => {
+      const min = -(n - 1) * w;
+      let v = startX.value + e.translationX;
+      if (v > 0) v *= 0.3;                          // rubber-band at the first photo
+      else if (v < min) v = min + (v - min) * 0.3;  // …and at the last
+      x.value = v;
+    })
+    .onEnd((e) => {
+      if (!w) return;
+      const cur = -x.value / w;
+      let k = Math.round(cur);
+      if (e.velocityX < -400) k = Math.ceil(cur);
+      else if (e.velocityX > 400) k = Math.floor(cur);
+      k = Math.max(0, Math.min(n - 1, k));
+      x.value = withSpring(-k * w, { ...SNAP, velocity: e.velocityX });
+      runOnJS(setI)(k);
+    }), [outerGesture, n, w]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const tap = useMemo(() => Gesture.Tap().maxDuration(300).onEnd((_e, ok) => { if (ok) runOnJS(onPress)(); }), [onPress]);
+  const gesture = useMemo(() => Gesture.Race(pan, tap), [pan, tap]);
+  const strip = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }));
+
   return (
     <View style={{ flex: 1, overflow: 'hidden' }} onLayout={(e) => setW(Math.round(e.nativeEvent.layout.width))}>
-      {!images.length || !w ? (
+      {!n || !w ? (
         <Hatch style={{ width: '100%', height: '100%' }} />
       ) : (
-        <GestureDetector gesture={inner}>
-        <FlatList
-          data={images}
-          horizontal
-          pagingEnabled
-          nestedScrollEnabled
-          showsHorizontalScrollIndicator={false}
-          style={{ width: w, height: IMG_H }}
-          keyExtractor={(u, k) => `${l.id}-${k}`}
-          getItemLayout={(_, index) => ({ length: w, offset: w * index, index })}
-          scrollEventThrottle={16}
-          onScroll={(e) => {
-            const n = Math.max(0, Math.min(images.length - 1, Math.round(e.nativeEvent.contentOffset.x / w)));
-            if (n !== i) setI(n);
-          }}
-          renderItem={({ item }) => (
-            <Image source={{ uri: item }} style={{ width: w, height: IMG_H }} contentFit="cover" transition={120} />
-          )}
-        />
+        <GestureDetector gesture={gesture}>
+          <Animated.View style={[{ flexDirection: 'row', width: w * n, height: IMG_H }, strip]}>
+            {images.map((u, k) => (
+              <Image key={`${l.id}-${k}`} source={{ uri: u }} style={{ width: w, height: IMG_H }} contentFit="cover" transition={120} />
+            ))}
+          </Animated.View>
         </GestureDetector>
       )}
-      {images.length > 1 && w ? (
-        <View style={{ position: 'absolute', bottom: 8, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(17,17,17,0.45)', paddingHorizontal: 8, paddingVertical: 5, borderRadius: radii.pill }}>
-          {images.length <= MAX_DOTS
-            ? images.map((_, k) => (
-              <View key={k} style={{ width: k === i ? 7 : 5, height: k === i ? 7 : 5, borderRadius: 4, backgroundColor: k === i ? '#fff' : 'rgba(255,255,255,0.55)' }} />
-            ))
-            : <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: '#fff' }}>{i + 1}/{images.length}</Text>}
-        </View>
-      ) : null}
+      <Dots n={n} i={i} />
     </View>
   );
 }
@@ -107,10 +143,7 @@ const PreviewCard = memo(function PreviewCard({ l, width, active, onPress, outer
     <View style={{ width, height: PREVIEW_H }}>
       <View style={{ flex: 1, backgroundColor: colors.card, borderRadius: radii.card, borderWidth: promoted ? 1.5 : 1, borderColor: promoted ? colors.ink : colors.ink12, overflow: 'hidden', ...softShadow, shadowOpacity: 0.18 }}>
         <View style={{ height: IMG_H, backgroundColor: colors.hatch, overflow: 'hidden' }}>
-          {/* Tapping the photo opens the property; dragging it pages the photos. */}
-          <Pressable onPress={onPress} style={{ flex: 1 }}>
-            <Photos l={l} active={active} outerGesture={outerGesture} />
-          </Pressable>
+          <Photos l={l} active={active} outerGesture={outerGesture} onPress={onPress} />
           <View style={{ position: 'absolute', top: 6, right: 6 }}>
             <SaveButton id={l.id} variant="card" />
           </View>
@@ -150,12 +183,13 @@ function SeeAllCard({ width, more, onPress }) {
 
 export default function PinPreview({ items, more = 0, bottom, onIndexChange, onOpen, onSeeAll }) {
   const { width: W } = useWindowDimensions();
-  const outerGesture = useMemo(() => Gesture.Native(), []);
   const cardW = Math.round(W * 0.9);
   const side = Math.round((W - cardW) / 2);
   const interval = cardW + GAP;
   const [idx, setIdx] = useState(0);
   const lastIdx = useRef(0);
+  // The card carousel's own scroll gesture — each card's photo pager blocks it.
+  const outerGesture = useMemo(() => Gesture.Native(), []);
   useEffect(() => { lastIdx.current = 0; setIdx(0); }, [items[0]?.id]);
   const data = more > 0 ? [...items, { __seeAll: true, id: '__see_all__' }] : items;
 
@@ -177,24 +211,24 @@ export default function PinPreview({ items, more = 0, bottom, onIndexChange, onO
       pointerEvents="box-none"
     >
       <GestureDetector gesture={outerGesture}>
-      <FlatList
-        key={items[0]?.id}
-        data={data}
-        horizontal
-        keyExtractor={(l) => l.id}
-        showsHorizontalScrollIndicator={false}
-        snapToInterval={interval}
-        decelerationRate="fast"
-        disableIntervalMomentum
-        contentContainerStyle={{ paddingHorizontal: side }}
-        ItemSeparatorComponent={() => <View style={{ width: GAP }} />}
-        scrollEventThrottle={16}
-        onScroll={onScroll}
-        onMomentumScrollEnd={onScroll}
-        renderItem={({ item, index }) => item.__seeAll
-          ? <SeeAllCard width={cardW} more={more} onPress={onSeeAll} />
-          : <PreviewCard l={item} width={cardW} active={Math.abs(index - idx) <= 1} onPress={() => onOpen(item)} outerGesture={outerGesture} />}
-      />
+        <FlatList
+          key={items[0]?.id}
+          data={data}
+          horizontal
+          keyExtractor={(l) => l.id}
+          showsHorizontalScrollIndicator={false}
+          snapToInterval={interval}
+          decelerationRate="fast"
+          disableIntervalMomentum
+          contentContainerStyle={{ paddingHorizontal: side }}
+          ItemSeparatorComponent={() => <View style={{ width: GAP }} />}
+          scrollEventThrottle={16}
+          onScroll={onScroll}
+          onMomentumScrollEnd={onScroll}
+          renderItem={({ item, index }) => item.__seeAll
+            ? <SeeAllCard width={cardW} more={more} onPress={onSeeAll} />
+            : <PreviewCard l={item} width={cardW} active={Math.abs(index - idx) <= 1} onPress={() => onOpen(item)} outerGesture={outerGesture} />}
+        />
       </GestureDetector>
     </Animated.View>
   );
