@@ -17,7 +17,6 @@ import { useCallback, useRef } from 'react';
 import { View, ActivityIndicator, Linking } from 'react-native';
 import { Image } from 'expo-image';
 import * as WebBrowser from 'expo-web-browser';
-import * as ExpoLinking from 'expo-linking';
 import { router, useFocusEffect } from 'expo-router';
 import { colors } from '../../lib/theme';
 import { useAuth, auth } from '../../lib/session';
@@ -40,18 +39,12 @@ export default function Publish() {
         const { ok, data } = await auth.handoff(WIZARD_PATH);
         if (ok && data?.url) url = data.url;
       }
-      const redirect = ExpoLinking.createURL('auth');   // casalibre://auth in a build
-      const res = await WebBrowser.openAuthSessionAsync(url, redirect);
-      if (res?.type === 'success' && res.url) {
-        // The web's "back to the app" button returns here carrying the session.
-        const q = ExpoLinking.parse(res.url).queryParams || {};
-        if (q.token) await auth.mobileExchange(String(q.token));
-        if (refresh) await refresh();
-        if (q.listing) { router.replace(`/property/${q.listing}`); return; }
-        router.replace('/my-listings');
-        return;
-      }
-      // Dismissed: they may still have published and signed in on the web.
+      // A PLAIN browser, deliberately: openAuthSessionAsync makes iOS show the
+      // "«Expo» wants to use casa-libre.com.py to sign in" prompt first. The web's
+      // "back to the app" button returns to casalibre://auth, which AuthDeepLink
+      // picks up (exchanges the session, closes the browser, routes on).
+      await WebBrowser.openBrowserAsync(url, { showTitle: false, toolbarColor: colors.paper });
+      // Browser closed without the return link: they may still have published.
       if (refresh) await refresh();
       router.replace('/(tabs)');
     } catch {

@@ -17,6 +17,7 @@ import { CountryProvider } from '../lib/country';
 import { AuthProvider } from '../lib/session';
 import { colors } from '../lib/theme';
 import UpdateGate from '../components/UpdateGate';
+import AuthDeepLink from '../components/AuthDeepLink';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -42,6 +43,7 @@ export default function RootLayout() {
         <CountryProvider>
         <I18nProvider>
          <AuthProvider>
+            <AuthDeepLink />
           <StatusBar style="dark" />
           {/* UpdateGate wraps the whole navigator: on startup/foreground it
               enforces the minimum supported native version (blocking wall) and
